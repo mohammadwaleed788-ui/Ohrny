@@ -123,11 +123,10 @@ export async function verifyTotp(req, res) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
 
-    const totpResult = verifyTotpSync({
+    const valid = verifyTotpSync({
       secret: row.totpSecret,
       token: String(code).trim(),
     })
-    const valid = totpResult?.valid === true
     if (!valid) {
       return res.status(401).json({ error: 'Invalid authenticator code' })
     }

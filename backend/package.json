@@ -8,9 +8,9 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "db:generate": "drizzle-kit generate",
+    "generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "db:migrate": "drizzle-kit migrate",
+    "migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:seed": "node db/seed.js"
   },
@@ -23,6 +23,7 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.5.0",
     "jsonwebtoken": "^9.0.3",
     "otplib": "^13.4.0",
     "pg": "^8.20.0"

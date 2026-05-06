@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt'
 import crypto from 'crypto'
-import { eq, and, desc } from 'drizzle-orm'
+import { eq, and, desc, gte, lt } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { REFRESH_TOKEN_TTL_MS } from '../../config/constants.js'
 import { users, userSessions } from '../../../db/schema/users.js'
@@ -48,7 +48,21 @@ export async function sendOtp(req, res) {
 
     const code = String(Math.floor(100000 + Math.random() * 900000))
     const codeHash = await bcrypt.hash(code, 10)
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
+    const now = new Date()
+    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000)
+
+    await db.delete(phoneVerifications).where(lt(phoneVerifications.expiresAt, now))
+
+    await db
+      .update(phoneVerifications)
+      .set({ expiresAt: now })
+      .where(
+        and(
+          eq(phoneVerifications.phone, digits),
+          eq(phoneVerifications.phoneCountry, country),
+          eq(phoneVerifications.verified, false),
+        ),
+      )
 
     await db.insert(phoneVerifications).values({
       phone: digits,
@@ -114,6 +128,23 @@ export async function verifyOtp(req, res) {
     const { phone: digits, phoneCountry: country } = normalizePhone(phoneCountry, phone)
     if (!code || String(code).length !== 6) {
       return res.status(400).json({ error: 'Invalid code' })
+    }
+
+    const attemptsWindowStart = new Date(Date.now() - 30 * 60 * 1000)
+    const recentAttempts = await db
+      .select({ attempts: phoneVerifications.attempts })
+      .from(phoneVerifications)
+      .where(
+        and(
+          eq(phoneVerifications.phone, digits),
+          eq(phoneVerifications.phoneCountry, country),
+          gte(phoneVerifications.createdAt, attemptsWindowStart),
+        ),
+      )
+
+    const totalAttempts = recentAttempts.reduce((sum, row) => sum + row.attempts, 0)
+    if (totalAttempts > 20) {
+      return res.status(429).json({ error: 'Too many attempts, try later' })
     }
 
     const [row] = await db
@@ -258,6 +289,24 @@ export async function logout(req, res) {
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Logout failed' })
+  }
+}
+
+export async function logoutAll(req, res) {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ error: 'Unauthorized' })
+    }
+
+    await db
+      .update(userSessions)
+      .set({ revokedAt: new Date() })
+      .where(eq(userSessions.userId, req.user.id))
+
+    return res.json({ ok: true })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Logout all failed' })
   }
 }
 

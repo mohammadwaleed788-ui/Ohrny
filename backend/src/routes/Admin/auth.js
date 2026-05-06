@@ -1,12 +1,13 @@
 import { Router } from 'express'
-import * as auth from '../../controllers/admin/auth.js'
+import * as auth from '../../controllers/Admin/auth.js'
 import { requireAuth } from '../../middleware/admin/auth.js'
+import { authLoginLimiter, otpLimiter, refreshLimiter } from '../../middleware/security/rateLimit.js'
 
 const router = Router()
 
-router.post('/auth/login', auth.login)
-router.post('/auth/verify-totp', auth.verifyTotp)
-router.post('/auth/refresh', auth.refresh)
+router.post('/auth/login', authLoginLimiter, auth.login)
+router.post('/auth/verify-totp', otpLimiter, auth.verifyTotp)
+router.post('/auth/refresh', refreshLimiter, auth.refresh)
 router.post('/auth/logout', requireAuth, auth.logout)
 router.get('/auth/me', requireAuth, auth.me)
 

@@ -15,7 +15,7 @@ export const users = pgTable('users', {
 
   // ── Identity ───────────────────────────────────────────────────────────────
   handle:               varchar('handle', { length: 24 }).notNull().unique(),
-  phone:                varchar('phone', { length: 20 }).notNull().unique(),
+  phone:                varchar('phone', { length: 20 }).notNull(),
   phoneCountry:         varchar('phone_country', { length: 6 }).notNull().default('+1'),
   phoneVerified:        boolean('phone_verified').notNull().default(false),
   twoFaMethod:          twoFaMethodEnum('two_fa_method'),
@@ -77,6 +77,7 @@ export const users = pgTable('users', {
   updatedAt:            timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   handleIdx:            index('users_handle_idx').on(t.handle),
+  phoneCountryPhoneUniq: uniqueIndex('users_phone_country_phone_uniq').on(t.phoneCountry, t.phone),
   phoneIdx:             index('users_phone_idx').on(t.phone),
   planIdx:              index('users_plan_idx').on(t.plan),
   cityIdx:              index('users_city_idx').on(t.city),
