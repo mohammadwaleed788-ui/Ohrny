@@ -1,12 +1,22 @@
 import bcrypt from 'bcrypt'
-import crypto from 'crypto'
 import { eq, and, desc, gte, lt } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
-import { REFRESH_TOKEN_TTL_MS } from '../../config/constants.js'
-import { users, userSessions } from '../../../db/schema/users.js'
+import {
+  users,
+  userPhotos,
+  userPrompts,
+  userInterests,
+  userLifestyle,
+} from '../../../db/schema/users.js'
 import { phoneVerifications } from '../../../db/schema/safety.js'
-import { generateOpaqueRefreshToken, hashToken } from '../../utils/crypto.js'
-import { signAccessTokenUser } from '../../utils/jwt.js'
+import { userPrivacySettings, userDiscoverPreferences } from '../../../db/schema/settings.js'
+import {
+  signAccessTokenUser,
+  signRefreshTokenUser,
+  signUserSignupToken,
+  verifyUserRefreshToken,
+  verifyUserSignupToken,
+} from '../../utils/jwt.js'
 
 function normalizePhone(country, nationalDigits) {
   const c = String(country || '+1').trim() || '+1'
@@ -14,27 +24,37 @@ function normalizePhone(country, nationalDigits) {
   return { phoneCountry: c.startsWith('+') ? c : `+${c}`, phone: digits }
 }
 
-function clientIp(req) {
-  const xff = req.headers['x-forwarded-for']
-  if (typeof xff === 'string' && xff.length) return xff.split(',')[0].trim()
-  return req.socket?.remoteAddress || ''
+async function loadUserDetails(userId) {
+  const [account] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
+  if (!account) return null
+
+  const [lifestyle, privacySettings, discoverPreferences, photos, prompts, interests] = await Promise.all([
+    db.select().from(userLifestyle).where(eq(userLifestyle.userId, userId)).limit(1).then((rows) => rows[0] || null),
+    db.select().from(userPrivacySettings).where(eq(userPrivacySettings.userId, userId)).limit(1).then((rows) => rows[0] || null),
+    db.select().from(userDiscoverPreferences).where(eq(userDiscoverPreferences.userId, userId)).limit(1).then((rows) => rows[0] || null),
+    db.select().from(userPhotos).where(eq(userPhotos.userId, userId)),
+    db.select().from(userPrompts).where(eq(userPrompts.userId, userId)),
+    db.select().from(userInterests).where(eq(userInterests.userId, userId)),
+  ])
+
+  return {
+    ...account,
+    lifestyle,
+    privacySettings,
+    discoverPreferences,
+    photos: photos.sort((a, b) => a.position - b.position),
+    prompts: prompts.sort((a, b) => a.position - b.position),
+    interests: interests.sort((a, b) => a.position - b.position),
+  }
 }
 
-async function issueTokens(accountId, req) {
-  const refreshToken = generateOpaqueRefreshToken()
-  const tokenHash = hashToken(refreshToken)
-  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
-
-  await db.insert(userSessions).values({
-    userId: accountId,
-    tokenHash,
-    ipAddress: clientIp(req),
-    userAgent: req.headers['user-agent'] || null,
-    expiresAt,
-  })
-
-  const [account] = await db.select().from(users).where(eq(users.id, accountId)).limit(1)
+async function issueTokens(accountId) {
+  const account = await loadUserDetails(accountId)
+  if (!account) {
+    throw new Error('Account not found')
+  }
   const accessToken = signAccessTokenUser({ id: account.id, handle: account.handle })
+  const refreshToken = signRefreshTokenUser({ id: account.id, handle: account.handle })
   return { accessToken, refreshToken, user: account }
 }
 
@@ -80,46 +100,43 @@ export async function sendOtp(req, res) {
   }
 }
 
-async function findOrCreateAccount(country, digits) {
-  const [existing] = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.phone, digits), eq(users.phoneCountry, country)))
-    .limit(1)
-
-  if (existing) {
-    await db
-      .update(users)
-      .set({ phoneVerified: true, updatedAt: new Date() })
-      .where(eq(users.id, existing.id))
-    const [u] = await db.select().from(users).where(eq(users.id, existing.id)).limit(1)
-    return { user: u, isNewUser: false }
+function mapRelationshipGoal(value) {
+  const map = {
+    casual: 'casual',
+    dating: 'dating',
+    serious: 'serious',
+    enm: 'non_monogamy',
+    non_monogamy: 'non_monogamy',
+    friends: 'friends',
+    unsure: 'figuring_out',
+    figuring_out: 'figuring_out',
   }
+  return map[value] || null
+}
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const suffix = crypto.randomBytes(4).toString('hex').slice(0, 7)
-    const handle = `u${suffix}`
-    try {
-      await db.insert(users).values({
-        handle,
-        phone: digits,
-        phoneCountry: country,
-        phoneVerified: true,
-        age: 18,
-        iam: 'other',
-        iamOther: 'Onboarding',
-      })
-      const [created] = await db
-        .select()
-        .from(users)
-        .where(and(eq(users.phone, digits), eq(users.phoneCountry, country)))
-        .limit(1)
-      return { user: created, isNewUser: true }
-    } catch (e) {
-      if (e.code !== '23505') throw e
-    }
+function mapRelStatus(value) {
+  const map = {
+    single: 'single',
+    partnered: 'in_relationship',
+    in_relationship: 'in_relationship',
+    married: 'married',
+    enm: 'non_monogamous',
+    non_monogamous: 'non_monogamous',
+    complicated: 'complicated',
+    private: 'prefer_not_say',
+    prefer_not_say: 'prefer_not_say',
   }
-  throw new Error('Could not allocate handle')
+  return map[value] || null
+}
+
+function mapTwoFaMethod(value) {
+  return value === 'sms' ? 'sms' : 'skipped'
+}
+
+function isValidHandle(value) {
+  const handle = String(value || '').trim()
+  if (handle.length < 2 || handle.length > 24) return false
+  return /^[a-zA-Z0-9_-]+$/.test(handle)
 }
 
 export async function verifyOtp(req, res) {
@@ -180,30 +197,218 @@ export async function verifyOtp(req, res) {
       .set({ verified: true })
       .where(eq(phoneVerifications.id, row.id))
 
-    const { user, isNewUser } = await findOrCreateAccount(country, digits)
+    const [existing] = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.phone, digits), eq(users.phoneCountry, country)))
+      .limit(1)
 
-    if (user.isBanned) {
-      return res.status(403).json({ error: 'Account suspended' })
-    }
-    if (user.deletedAt) {
-      return res.status(403).json({ error: 'Account not available' })
+    if (existing) {
+      if (existing.isBanned) {
+        return res.status(403).json({ error: 'Account suspended' })
+      }
+      if (existing.deletedAt) {
+        return res.status(403).json({ error: 'Account not available' })
+      }
+
+      await db
+        .update(users)
+        .set({ phoneVerified: true, updatedAt: new Date() })
+        .where(eq(users.id, existing.id))
+
+      const tokens = await issueTokens(existing.id)
+      return res.json({
+        flow: 'login',
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        user: tokens.user,
+      })
     }
 
-    const tokens = await issueTokens(user.id, req)
+    const signupToken = signUserSignupToken({
+      phone: digits,
+      phoneCountry: country,
+      verificationId: row.id,
+    })
     return res.json({
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      isNewUser,
-      user: {
-        id: tokens.user.id,
-        handle: tokens.user.handle,
-        phoneVerified: tokens.user.phoneVerified,
-        plan: tokens.user.plan,
-      },
+      flow: 'signup',
+      signupToken,
+      expiresIn: 900,
     })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Verification failed' })
+  }
+}
+
+export async function completeOnboarding(req, res) {
+  try {
+    const {
+      signupToken,
+      handle,
+      age,
+      iam,
+      iamOther,
+      relationshipGoal,
+      relStatus,
+      orientation,
+      city,
+      locationGranted,
+      searchRadius,
+      minRadius,
+      twoFaMethod,
+      privacy,
+      myBlur,
+      photos,
+    } = req.body || {}
+
+    if (!signupToken) {
+      return res.status(400).json({ error: 'signupToken required' })
+    }
+    if (!isValidHandle(handle)) {
+      return res.status(400).json({ error: 'Invalid handle' })
+    }
+    const safeAge = Number(age)
+    if (!Number.isInteger(safeAge) || safeAge < 18 || safeAge > 99) {
+      return res.status(400).json({ error: 'Invalid age' })
+    }
+    if (!iam || !['woman', 'man', 'nonbinary', 'other'].includes(iam)) {
+      return res.status(400).json({ error: 'Invalid iam value' })
+    }
+    const mappedGoal = mapRelationshipGoal(relationshipGoal)
+    if (!mappedGoal) {
+      return res.status(400).json({ error: 'Invalid relationshipGoal' })
+    }
+    const mappedStatus = mapRelStatus(relStatus)
+    if (!mappedStatus) {
+      return res.status(400).json({ error: 'Invalid relStatus' })
+    }
+    if (!Array.isArray(orientation) || orientation.length === 0) {
+      return res.status(400).json({ error: 'orientation required' })
+    }
+    if (!Array.isArray(photos) || photos.length < 3 || photos.length > 6) {
+      return res.status(400).json({ error: '3-6 photos required' })
+    }
+    for (const photo of photos) {
+      if (!photo?.storageKey || !photo?.position) {
+        return res.status(400).json({ error: 'Invalid photos payload' })
+      }
+    }
+
+    let payload
+    try {
+      payload = verifyUserSignupToken(signupToken)
+    } catch {
+      return res.status(401).json({ error: 'Invalid or expired signup token' })
+    }
+
+    const [verification] = await db
+      .select()
+      .from(phoneVerifications)
+      .where(eq(phoneVerifications.id, payload.verificationId))
+      .limit(1)
+    if (!verification || !verification.verified) {
+      return res.status(401).json({ error: 'Phone verification required' })
+    }
+    if (
+      verification.phone !== payload.phone ||
+      verification.phoneCountry !== payload.phoneCountry
+    ) {
+      return res.status(401).json({ error: 'Signup token mismatch' })
+    }
+
+    const [existingByPhone] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.phone, payload.phone), eq(users.phoneCountry, payload.phoneCountry)))
+      .limit(1)
+    if (existingByPhone) {
+      return res.status(409).json({ error: 'Account already exists for this phone' })
+    }
+
+    const [existingByHandle] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.handle, String(handle).trim()))
+      .limit(1)
+    if (existingByHandle) {
+      return res.status(409).json({ error: 'Handle is already taken' })
+    }
+
+    const normalizedPhotos = photos
+      .map((p) => ({
+        position: Number(p.position),
+        storageKey: String(p.storageKey),
+        isBlurred: p.isBlurred !== false,
+        blurAmount: Number.isInteger(Number(p.blurAmount)) ? Number(p.blurAmount) : 70,
+      }))
+      .sort((a, b) => a.position - b.position)
+
+    const privacySafe = privacy || {}
+    const [created] = await db.transaction(async (tx) => {
+      const [inserted] = await tx
+        .insert(users)
+        .values({
+          handle: String(handle).trim(),
+          phone: payload.phone,
+          phoneCountry: payload.phoneCountry,
+          phoneVerified: true,
+          age: safeAge,
+          iam,
+          iamOther: iam === 'other' ? String(iamOther || '').trim() : null,
+          relationshipGoal: mappedGoal,
+          relStatus: mappedStatus,
+          orientation: orientation.map((x) => String(x)),
+          city: city ? String(city).trim() : null,
+          locationGranted: Boolean(locationGranted),
+          searchRadius: Number.isInteger(Number(searchRadius)) ? Number(searchRadius) : 25,
+          minRadius: Number.isInteger(Number(minRadius)) ? Number(minRadius) : 0,
+          myBlur: Number.isInteger(Number(myBlur)) ? Number(myBlur) : 70,
+          twoFaMethod: mapTwoFaMethod(twoFaMethod),
+          profileCompletePct: 100,
+        })
+        .returning({ id: users.id })
+
+      await tx.insert(userPhotos).values(
+        normalizedPhotos.map((p) => ({
+          userId: inserted.id,
+          position: p.position,
+          storageKey: p.storageKey,
+          blurAmount: Math.max(0, Math.min(100, p.blurAmount)),
+          isBlurred: p.isBlurred,
+          isMain: p.position === 1,
+        })),
+      )
+
+      await tx.insert(userPrivacySettings).values({
+        userId: inserted.id,
+        blurPhotos: privacySafe.blur !== false,
+        anonymousHandle: privacySafe.anon !== false,
+        ephemeralMessages: privacySafe.ephem !== false,
+        screenshotShield: privacySafe.screenshot !== false,
+        incognitoMode: Boolean(privacySafe.incognito),
+      })
+
+      await tx.insert(userDiscoverPreferences).values({
+        userId: inserted.id,
+        maxDistance: Number.isInteger(Number(searchRadius)) ? Number(searchRadius) : 25,
+        minDistance: Number.isInteger(Number(minRadius)) ? Number(minRadius) : 0,
+        photoBlurVisibility: Number.isInteger(Number(myBlur)) ? Number(myBlur) : 70,
+      })
+
+      return [inserted]
+    })
+
+    const tokens = await issueTokens(created.id)
+    return res.status(201).json({
+      flow: 'signup_completed',
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      user: tokens.user,
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Onboarding failed' })
   }
 }
 
@@ -214,44 +419,26 @@ export async function refresh(req, res) {
       return res.status(400).json({ error: 'refreshToken required' })
     }
 
-    const tokenHash = hashToken(refreshToken)
-    const [session] = await db
-      .select()
-      .from(userSessions)
-      .where(eq(userSessions.tokenHash, tokenHash))
-      .limit(1)
-
-    if (!session || session.revokedAt || session.expiresAt < new Date()) {
+    let payload
+    try {
+      payload = verifyUserRefreshToken(refreshToken)
+    } catch {
       return res.status(401).json({ error: 'Invalid session' })
     }
 
-    const [account] = await db.select().from(users).where(eq(users.id, session.userId)).limit(1)
+    const [account] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1)
     if (!account || account.isBanned || account.deletedAt) {
       return res.status(401).json({ error: 'Invalid session' })
     }
 
-    const newRt = generateOpaqueRefreshToken()
-    const newHash = hashToken(newRt)
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
-
-    await db
-      .update(userSessions)
-      .set({
-        tokenHash: newHash,
-        expiresAt,
-      })
-      .where(eq(userSessions.id, session.id))
-
     const accessToken = signAccessTokenUser({ id: account.id, handle: account.handle })
+    const nextRefreshToken = signRefreshTokenUser({ id: account.id, handle: account.handle })
+    const fullUser = await loadUserDetails(account.id)
 
     return res.json({
       accessToken,
-      refreshToken: newRt,
-      user: {
-        id: account.id,
-        handle: account.handle,
-        plan: account.plan,
-      },
+      refreshToken: nextRefreshToken,
+      user: fullUser,
     })
   } catch (err) {
     console.error(err)
@@ -259,71 +446,9 @@ export async function refresh(req, res) {
   }
 }
 
-export async function logout(req, res) {
-  try {
-    const { refreshToken } = req.body || {}
-    if (!refreshToken) {
-      return res.status(400).json({ error: 'refreshToken required' })
-    }
-    if (!req.user?.id) {
-      return res.status(401).json({ error: 'Unauthorized' })
-    }
-
-    const tokenHash = hashToken(refreshToken)
-    const [session] = await db
-      .select()
-      .from(userSessions)
-      .where(eq(userSessions.tokenHash, tokenHash))
-      .limit(1)
-
-    if (!session || session.userId !== req.user.id) {
-      return res.status(401).json({ error: 'Invalid session' })
-    }
-
-    await db
-      .update(userSessions)
-      .set({ revokedAt: new Date() })
-      .where(eq(userSessions.id, session.id))
-
-    return res.json({ ok: true })
-  } catch (err) {
-    console.error(err)
-    return res.status(500).json({ error: 'Logout failed' })
-  }
-}
-
-export async function logoutAll(req, res) {
-  try {
-    if (!req.user?.id) {
-      return res.status(401).json({ error: 'Unauthorized' })
-    }
-
-    await db
-      .update(userSessions)
-      .set({ revokedAt: new Date() })
-      .where(eq(userSessions.userId, req.user.id))
-
-    return res.json({ ok: true })
-  } catch (err) {
-    console.error(err)
-    return res.status(500).json({ error: 'Logout all failed' })
-  }
-}
-
 export async function me(req, res) {
   try {
-    const [account] = await db
-      .select({
-        id: users.id,
-        handle: users.handle,
-        plan: users.plan,
-        phoneVerified: users.phoneVerified,
-        profileCompletePct: users.profileCompletePct,
-        createdAt: users.createdAt,
-      })
-      .from(users)
-      .where(eq(users.id, req.user.id))
-      .limit(1)
+    const account = await loadUserDetails(req.user.id)
 
     if (!account) {
       return res.status(404).json({ error: 'Not found' })

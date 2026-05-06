@@ -2,12 +2,12 @@ import bcrypt from 'bcrypt'
 import { eq } from 'drizzle-orm'
 import { verifySync as verifyTotpSync } from 'otplib'
 import { db } from '../../../db/index.js'
-import { REFRESH_TOKEN_TTL_MS } from '../../config/constants.js'
-import { adminUsers, adminSessions, adminAuditLogs } from '../../../db/schema/admin.js'
-import { generateOpaqueRefreshToken, hashToken } from '../../utils/crypto.js'
+import { adminUsers } from '../../../db/schema/admin.js'
 import {
   signAccessTokenAdmin,
+  signRefreshTokenAdmin,
   signTotpStepToken,
+  verifyAdminRefreshToken,
   verifyTotpStepToken,
 } from '../../utils/jwt.js'
 
@@ -15,16 +15,6 @@ function clientIp(req) {
   const xff = req.headers['x-forwarded-for']
   if (typeof xff === 'string' && xff.length) return xff.split(',')[0].trim()
   return req.socket?.remoteAddress || ''
-}
-
-async function insertAudit(staffId, action, req, extra = {}) {
-  await db.insert(adminAuditLogs).values({
-    adminId: staffId,
-    action,
-    ipAddress: clientIp(req),
-    userAgent: req.headers['user-agent'] || null,
-    ...extra,
-  })
 }
 
 export async function login(req, res) {
@@ -58,16 +48,10 @@ export async function login(req, res) {
       return res.json({ requireTotp: true, totpToken })
     }
 
-    const refreshToken = generateOpaqueRefreshToken()
-    const tokenHash = hashToken(refreshToken)
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
-
-    await db.insert(adminSessions).values({
-      adminId: row.id,
-      tokenHash,
-      ipAddress: clientIp(req),
-      userAgent: req.headers['user-agent'] || null,
-      expiresAt,
+    const refreshToken = signRefreshTokenAdmin({
+      id: row.id,
+      email: row.email,
+      role: row.role,
     })
 
     await db
@@ -78,8 +62,6 @@ export async function login(req, res) {
         updatedAt: new Date(),
       })
       .where(eq(adminUsers.id, row.id))
-
-    await insertAudit(row.id, 'admin_login', req)
 
     const accessToken = signAccessTokenAdmin({
       id: row.id,
@@ -131,16 +113,10 @@ export async function verifyTotp(req, res) {
       return res.status(401).json({ error: 'Invalid authenticator code' })
     }
 
-    const refreshToken = generateOpaqueRefreshToken()
-    const tokenHash = hashToken(refreshToken)
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
-
-    await db.insert(adminSessions).values({
-      adminId: row.id,
-      tokenHash,
-      ipAddress: clientIp(req),
-      userAgent: req.headers['user-agent'] || null,
-      expiresAt,
+    const refreshToken = signRefreshTokenAdmin({
+      id: row.id,
+      email: row.email,
+      role: row.role,
     })
 
     await db
@@ -151,8 +127,6 @@ export async function verifyTotp(req, res) {
         updatedAt: new Date(),
       })
       .where(eq(adminUsers.id, row.id))
-
-    await insertAudit(row.id, 'admin_login_totp', req)
 
     const accessToken = signAccessTokenAdmin({
       id: row.id,
@@ -183,35 +157,24 @@ export async function refresh(req, res) {
       return res.status(400).json({ error: 'refreshToken required' })
     }
 
-    const tokenHash = hashToken(refreshToken)
-    const [session] = await db
-      .select()
-      .from(adminSessions)
-      .where(eq(adminSessions.tokenHash, tokenHash))
-      .limit(1)
-
-    if (!session || session.revokedAt || session.expiresAt < new Date()) {
+    let payload
+    try {
+      payload = verifyAdminRefreshToken(refreshToken)
+    } catch {
       return res.status(401).json({ error: 'Invalid session' })
     }
 
-    const [row] = await db.select().from(adminUsers).where(eq(adminUsers.id, session.adminId)).limit(1)
+    const [row] = await db.select().from(adminUsers).where(eq(adminUsers.id, payload.sub)).limit(1)
     if (!row || !row.isActive) {
       return res.status(401).json({ error: 'Invalid session' })
     }
 
-    const newRt = generateOpaqueRefreshToken()
-    const newHash = hashToken(newRt)
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
-
-    await db
-      .update(adminSessions)
-      .set({
-        tokenHash: newHash,
-        expiresAt,
-      })
-      .where(eq(adminSessions.id, session.id))
-
     const accessToken = signAccessTokenAdmin({
+      id: row.id,
+      email: row.email,
+      role: row.role,
+    })
+    const nextRefreshToken = signRefreshTokenAdmin({
       id: row.id,
       email: row.email,
       role: row.role,
@@ -219,7 +182,7 @@ export async function refresh(req, res) {
 
     return res.json({
       accessToken,
-      refreshToken: newRt,
+      refreshToken: nextRefreshToken,
       admin: {
         id: row.id,
         email: row.email,
@@ -230,41 +193,6 @@ export async function refresh(req, res) {
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Refresh failed' })
-  }
-}
-
-export async function logout(req, res) {
-  try {
-    const { refreshToken } = req.body || {}
-    if (!refreshToken) {
-      return res.status(400).json({ error: 'refreshToken required' })
-    }
-    if (!req.admin?.id) {
-      return res.status(401).json({ error: 'Unauthorized' })
-    }
-
-    const tokenHash = hashToken(refreshToken)
-    const [session] = await db
-      .select()
-      .from(adminSessions)
-      .where(eq(adminSessions.tokenHash, tokenHash))
-      .limit(1)
-
-    if (!session || session.adminId !== req.admin.id) {
-      return res.status(401).json({ error: 'Invalid session' })
-    }
-
-    await db
-      .update(adminSessions)
-      .set({ revokedAt: new Date() })
-      .where(eq(adminSessions.id, session.id))
-
-    await insertAudit(req.admin.id, 'admin_logout', req)
-
-    return res.json({ ok: true })
-  } catch (err) {
-    console.error(err)
-    return res.status(500).json({ error: 'Logout failed' })
   }
 }
 

@@ -149,33 +149,12 @@ export const userInterests = pgTable('user_interests', {
   userIdx:   index('user_interests_user_idx').on(t.userId),
 }));
 
-// ─── user_sessions ───────────────────────────────────────────────────────────
-// Opaque refresh tokens for the user (mobile) API — SHA-256 hash stored.
-export const userSessions = pgTable('user_sessions', {
-  id:           uuid('id').primaryKey().defaultRandom(),
-  userId:       uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-
-  tokenHash:    varchar('token_hash', { length: 128 }).notNull().unique(),
-
-  ipAddress:    varchar('ip_address', { length: 45 }),
-  userAgent:    text('user_agent'),
-
-  expiresAt:    timestamp('expires_at', { withTimezone: true }).notNull(),
-  revokedAt:    timestamp('revoked_at', { withTimezone: true }),
-
-  createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-}, (t) => ({
-  userIdx:      index('user_sessions_user_idx').on(t.userId),
-  expiresIdx:   index('user_sessions_expires_idx').on(t.expiresAt),
-}));
-
 // ─── Relations ────────────────────────────────────────────────────────────────
 export const usersRelations = relations(users, ({ one, many }) => ({
   lifestyle:          one(userLifestyle, { fields: [users.id], references: [userLifestyle.userId] }),
   photos:             many(userPhotos),
   prompts:            many(userPrompts),
   interests:          many(userInterests),
-  sessions:           many(userSessions),
 }));
 
 export const userLifestyleRelations = relations(userLifestyle, ({ one }) => ({
@@ -194,6 +173,3 @@ export const userInterestsRelations = relations(userInterests, ({ one }) => ({
   user: one(users, { fields: [userInterests.userId], references: [users.id] }),
 }));
 
-export const userSessionsRelations = relations(userSessions, ({ one }) => ({
-  user: one(users, { fields: [userSessions.userId], references: [users.id] }),
-}));

@@ -7,9 +7,8 @@ const router = Router()
 
 router.post('/auth/send-otp', otpLimiter, auth.sendOtp)
 router.post('/auth/verify-otp', otpLimiter, auth.verifyOtp)
+router.post('/auth/onboarding/complete', auth.completeOnboarding)
 router.post('/auth/refresh', refreshLimiter, auth.refresh)
-router.post('/auth/logout', requireAuth, auth.logout)
-router.post('/auth/logout-all', requireAuth, auth.logoutAll)
 router.get('/auth/me', requireAuth, auth.me)
 
 export default router
