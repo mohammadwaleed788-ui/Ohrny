@@ -60,10 +60,33 @@ async function issueTokens(accountId) {
 
 export async function sendOtp(req, res) {
   try {
-    const { phone, phoneCountry } = req.body || {}
+    const { phone, phoneCountry, flow } = req.body || {}
     const { phone: digits, phoneCountry: country } = normalizePhone(phoneCountry, phone)
     if (digits.length < 8) {
       return res.status(400).json({ error: 'Invalid phone number' })
+    }
+
+    const [existing] = await db
+      .select({ id: users.id, isBanned: users.isBanned, deletedAt: users.deletedAt })
+      .from(users)
+      .where(and(eq(users.phone, digits), eq(users.phoneCountry, country)))
+      .limit(1)
+
+    if (flow === 'login') {
+      if (!existing) {
+        return res.status(404).json({ error: 'No account found with this number. New here? Create a profile.' })
+      }
+      if (existing.isBanned) {
+        return res.status(403).json({ error: 'Account suspended' })
+      }
+      if (existing.deletedAt) {
+        return res.status(403).json({ error: 'Account not available' })
+      }
+    } else {
+      // signup flow
+      if (existing && !existing.deletedAt) {
+        return res.status(409).json({ error: 'An account already exists for this number. Please sign in instead.' })
+      }
     }
 
     const code = String(Math.floor(100000 + Math.random() * 900000))
