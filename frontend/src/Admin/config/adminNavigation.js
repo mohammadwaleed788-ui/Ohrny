@@ -23,14 +23,6 @@ export const adminNavGroups = [
       { id: 'algorithm', label: 'Algorithm' },
       { id: 'notifications', label: 'Notifications' },
       { id: 'plans', label: 'Plans & Limits' },
-      { id: 'tweaks', label: 'Tweaks' },
-    ],
-  },
-  {
-    group: 'Identity',
-    items: [
-      { id: 'login', label: 'Login' },
-      { id: 'anon', label: 'Anonymization' },
     ],
   },
   {
@@ -52,7 +44,4 @@ export const routeCrumbs = {
   plans: ['Product', 'Plans & Limits'],
   support: ['Operations', 'Support'],
   team: ['Organization', 'Team'],
-  login: ['Identity', 'Login'],
-  anon: ['Identity', 'Anonymization'],
-  tweaks: ['Product', 'Tweaks'],
 }

@@ -1,11 +1,10 @@
-import { Ban, Bell, Search, Shield, SlidersHorizontal } from 'lucide-react'
+import { Ban, Bell, Search, Shield } from 'lucide-react'
 import { adminTokens } from '../theme/tokens'
 
 export function AdminTopbar({
   crumbs = ['Ohrny admin', 'Overview'],
   anon = true,
   onToggleAnon = () => {},
-  onOpenTweaks = () => {},
   onSignOut = () => {},
 }) {
   return (
@@ -47,14 +46,6 @@ export function AdminTopbar({
         >
           <Bell className="h-4 w-4" />
           <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-orange-400" />
-        </button>
-        <button
-          type="button"
-          className={`grid h-8 w-8 place-items-center rounded-md border ${adminTokens.borderSoft} ${adminTokens.bgElev} ${adminTokens.textDim} hover:bg-[oklch(0.26_0.014_260)]`}
-          title="Tweaks"
-          onClick={onOpenTweaks}
-        >
-          <SlidersHorizontal className="h-4 w-4" />
         </button>
         <button
           type="button"

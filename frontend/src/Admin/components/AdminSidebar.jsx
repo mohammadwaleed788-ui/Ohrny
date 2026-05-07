@@ -123,7 +123,7 @@ function WorkspaceSwitcher({ collapsed }) {
           <div className={`border-t ${adminTokens.borderSoft} px-2 pt-2 text-[10.5px] ${adminTokens.textMute}`}>Opens in a new window</div>
         </div>
       )}
-    </div >
+    </div>
   )
 }
 
