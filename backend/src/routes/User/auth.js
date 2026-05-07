@@ -14,5 +14,8 @@ router.post('/auth/logout', requireAuth, auth.logout)
 router.patch('/profile', requireAuth, auth.updateProfile)
 router.patch('/privacy', requireAuth, auth.updatePrivacy)
 router.patch('/preferences', requireAuth, auth.updatePreferences)
+router.delete('/account', requireAuth, auth.deleteAccount)
+router.post('/account/wipe', requireAuth, auth.wipeAccount)
+router.patch('/account/pause', requireAuth, auth.pauseAccount)
 
 export default router

@@ -677,3 +677,111 @@ export async function updatePreferences(req, res) {
     return res.status(500).json({ error: 'Preferences update failed' })
   }
 }
+
+export async function deleteAccount(req, res) {
+  try {
+    const userId = req.user.id
+
+    const [account] = await db
+      .select({ phone: users.phone, phoneCountry: users.phoneCountry })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+
+    if (!account) return res.status(404).json({ error: 'Account not found' })
+
+    // Clean up phone verifications (not cascade-linked to users)
+    await db.delete(phoneVerifications).where(
+      and(
+        eq(phoneVerifications.phone, account.phone),
+        eq(phoneVerifications.phoneCountry, account.phoneCountry),
+      ),
+    )
+
+    // Delete user — cascade removes all related rows automatically
+    await db.delete(users).where(eq(users.id, userId))
+
+    return res.json({ ok: true })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Account deletion failed' })
+  }
+}
+
+export async function wipeAccount(req, res) {
+  try {
+    const userId = req.user.id
+
+    await db.transaction(async (tx) => {
+      // Clear optional profile fields, keep account credentials intact
+      await tx
+        .update(users)
+        .set({
+          bio: null,
+          pronouns: null,
+          looking: null,
+          work: null,
+          profileCompletePct: 10,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId))
+
+      // Remove media and content
+      await tx.delete(userPhotos).where(eq(userPhotos.userId, userId))
+      await tx.delete(userPrompts).where(eq(userPrompts.userId, userId))
+      await tx.delete(userInterests).where(eq(userInterests.userId, userId))
+
+      // Reset lifestyle to nulls (keep row for future edits)
+      await tx
+        .update(userLifestyle)
+        .set({
+          height: null,
+          drinks: null,
+          smokes: null,
+          kids: null,
+          pets: null,
+          diet: null,
+          exercise: null,
+          religion: null,
+          education: null,
+          zodiac: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(userLifestyle.userId, userId))
+    })
+
+    const updated = await loadUserDetails(userId)
+    return res.json({ user: updated })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Data wipe failed' })
+  }
+}
+
+export async function pauseAccount(req, res) {
+  try {
+    const userId = req.user.id
+
+    const [account] = await db
+      .select({ isPaused: users.isPaused })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+
+    if (!account) return res.status(404).json({ error: 'Account not found' })
+
+    const nowPaused = !account.isPaused
+    const pausedUntil = nowPaused ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null
+
+    await db
+      .update(users)
+      .set({ isPaused: nowPaused, pausedUntil, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+
+    const updated = await loadUserDetails(userId)
+    return res.json({ user: updated, isPaused: nowPaused })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Pause toggle failed' })
+  }
+}
