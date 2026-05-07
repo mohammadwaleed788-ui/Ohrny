@@ -10,5 +10,9 @@ router.post('/auth/verify-otp', otpLimiter, auth.verifyOtp)
 router.post('/auth/onboarding/complete', auth.completeOnboarding)
 router.post('/auth/refresh', refreshLimiter, auth.refresh)
 router.get('/auth/me', requireAuth, auth.me)
+router.post('/auth/logout', requireAuth, auth.logout)
+router.patch('/profile', requireAuth, auth.updateProfile)
+router.patch('/privacy', requireAuth, auth.updatePrivacy)
+router.patch('/preferences', requireAuth, auth.updatePreferences)
 
 export default router

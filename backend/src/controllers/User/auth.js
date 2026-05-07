@@ -253,6 +253,9 @@ export async function completeOnboarding(req, res) {
       relStatus,
       orientation,
       city,
+      countryCode,
+      lat,
+      lng,
       locationGranted,
       searchRadius,
       minRadius,
@@ -360,6 +363,13 @@ export async function completeOnboarding(req, res) {
           relStatus: mappedStatus,
           orientation: orientation.map((x) => String(x)),
           city: city ? String(city).trim() : null,
+          countryCode: countryCode ? String(countryCode).trim().slice(0, 4) : null,
+          latApprox: lat != null && !Number.isNaN(Number(lat))
+            ? String(Math.round(Number(lat) * 100) / 100)
+            : null,
+          lngApprox: lng != null && !Number.isNaN(Number(lng))
+            ? String(Math.round(Number(lng) * 100) / 100)
+            : null,
           locationGranted: Boolean(locationGranted),
           searchRadius: Number.isInteger(Number(searchRadius)) ? Number(searchRadius) : 25,
           minRadius: Number.isInteger(Number(minRadius)) ? Number(minRadius) : 0,
@@ -457,5 +467,213 @@ export async function me(req, res) {
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed' })
+  }
+}
+
+export async function updateProfile(req, res) {
+  try {
+    const userId = req.user.id
+    const {
+      bio,
+      pronouns,
+      looking,
+      work,
+      orientation,
+      relStatus,
+      relationshipGoal,
+      lifestyle,
+      interests,
+      prompts,
+    } = req.body || {}
+
+    const userUpdates = {}
+    if (bio !== undefined) userUpdates.bio = bio ? String(bio).trim().slice(0, 500) : null
+    if (pronouns !== undefined) userUpdates.pronouns = pronouns ? String(pronouns).trim().slice(0, 40) : null
+    if (looking !== undefined) userUpdates.looking = looking ? String(looking).trim().slice(0, 120) : null
+    if (work !== undefined) userUpdates.work = work ? String(work).trim().slice(0, 120) : null
+    if (Array.isArray(orientation) && orientation.length > 0) {
+      userUpdates.orientation = orientation.map((x) => String(x))
+    }
+    if (relStatus !== undefined) {
+      const mapped = mapRelStatus(relStatus)
+      if (mapped) userUpdates.relStatus = mapped
+    }
+    if (relationshipGoal !== undefined) {
+      const mapped = mapRelationshipGoal(relationshipGoal)
+      if (mapped) userUpdates.relationshipGoal = mapped
+    }
+
+    await db.transaction(async (tx) => {
+      if (Object.keys(userUpdates).length > 0) {
+        await tx.update(users).set({ ...userUpdates, updatedAt: new Date() }).where(eq(users.id, userId))
+      }
+
+      if (lifestyle && typeof lifestyle === 'object') {
+        const ls = {
+          userId,
+          height: lifestyle.height ? String(lifestyle.height).slice(0, 20) : null,
+          drinks: lifestyle.drinks ? String(lifestyle.drinks).slice(0, 40) : null,
+          smokes: lifestyle.smokes ? String(lifestyle.smokes).slice(0, 40) : null,
+          kids: lifestyle.kids ? String(lifestyle.kids).slice(0, 60) : null,
+          pets: lifestyle.pets ? String(lifestyle.pets).slice(0, 60) : null,
+          diet: lifestyle.diet ? String(lifestyle.diet).slice(0, 60) : null,
+          exercise: lifestyle.exercise ? String(lifestyle.exercise).slice(0, 60) : null,
+          religion: lifestyle.religion ? String(lifestyle.religion).slice(0, 60) : null,
+          education: lifestyle.education ? String(lifestyle.education).slice(0, 60) : null,
+          zodiac: lifestyle.zodiac ? String(lifestyle.zodiac).slice(0, 20) : null,
+        }
+        await tx
+          .insert(userLifestyle)
+          .values(ls)
+          .onConflictDoUpdate({ target: userLifestyle.userId, set: { ...ls, updatedAt: new Date() } })
+      }
+
+      if (Array.isArray(interests)) {
+        await tx.delete(userInterests).where(eq(userInterests.userId, userId))
+        if (interests.length > 0) {
+          await tx.insert(userInterests).values(
+            interests.slice(0, 6).map((interest, i) => ({
+              userId,
+              interest: String(interest).slice(0, 60),
+              position: i,
+            })),
+          )
+        }
+      }
+
+      if (Array.isArray(prompts)) {
+        for (const p of prompts.slice(0, 3)) {
+          if (!p?.title || !p?.answer) continue
+          const position = Math.max(1, Math.min(3, Number(p.position) || 1))
+          await tx
+            .insert(userPrompts)
+            .values({
+              userId,
+              position,
+              title: String(p.title).slice(0, 80),
+              answer: String(p.answer).slice(0, 160),
+            })
+            .onConflictDoUpdate({
+              target: [userPrompts.userId, userPrompts.position],
+              set: {
+                title: String(p.title).slice(0, 80),
+                answer: String(p.answer).slice(0, 160),
+                updatedAt: new Date(),
+              },
+            })
+        }
+      }
+    })
+
+    const updated = await loadUserDetails(userId)
+    return res.json({ user: updated })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Profile update failed' })
+  }
+}
+
+export async function logout(req, res) {
+  // No server-side token store yet — client clears device storage.
+  // This endpoint exists as a hook for future: push token removal, audit log, etc.
+  return res.json({ ok: true })
+}
+
+export async function updatePrivacy(req, res) {
+  try {
+    const userId = req.user.id
+    const {
+      blurPhotos,
+      anonymousHandle,
+      ephemeralMessages,
+      screenshotShield,
+      incognitoMode,
+      analyticsConsent,
+      personalizationConsent,
+      marketingEmails,
+      thirdPartyMeasurement,
+    } = req.body || {}
+
+    const updates = {}
+    if (blurPhotos !== undefined) updates.blurPhotos = Boolean(blurPhotos)
+    if (anonymousHandle !== undefined) updates.anonymousHandle = Boolean(anonymousHandle)
+    if (ephemeralMessages !== undefined) updates.ephemeralMessages = Boolean(ephemeralMessages)
+    if (screenshotShield !== undefined) updates.screenshotShield = Boolean(screenshotShield)
+    if (incognitoMode !== undefined) updates.incognitoMode = Boolean(incognitoMode)
+    if (analyticsConsent !== undefined) updates.analyticsConsent = Boolean(analyticsConsent)
+    if (personalizationConsent !== undefined) updates.personalizationConsent = Boolean(personalizationConsent)
+    if (marketingEmails !== undefined) updates.marketingEmails = Boolean(marketingEmails)
+    if (thirdPartyMeasurement !== undefined) updates.thirdPartyMeasurement = Boolean(thirdPartyMeasurement)
+
+    if (Object.keys(updates).length > 0) {
+      await db
+        .update(userPrivacySettings)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(userPrivacySettings.userId, userId))
+    }
+
+    const updated = await loadUserDetails(userId)
+    return res.json({ user: updated })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Privacy update failed' })
+  }
+}
+
+export async function updatePreferences(req, res) {
+  try {
+    const userId = req.user.id
+    const {
+      maxDistance,
+      minDistance,
+      ageMin,
+      ageMax,
+      relationshipType,
+      photoBlurVisibility,
+    } = req.body || {}
+
+    const prefUpdates = {}
+    if (maxDistance !== undefined && !Number.isNaN(Number(maxDistance))) {
+      prefUpdates.maxDistance = Math.max(1, Math.min(200, Math.round(Number(maxDistance))))
+    }
+    if (minDistance !== undefined && !Number.isNaN(Number(minDistance))) {
+      prefUpdates.minDistance = Math.max(0, Math.min(100, Math.round(Number(minDistance))))
+    }
+    if (ageMin !== undefined && !Number.isNaN(Number(ageMin))) {
+      prefUpdates.ageMin = Math.max(18, Math.min(99, Math.round(Number(ageMin))))
+    }
+    if (ageMax !== undefined && !Number.isNaN(Number(ageMax))) {
+      prefUpdates.ageMax = Math.max(18, Math.min(99, Math.round(Number(ageMax))))
+    }
+    if (relationshipType !== undefined) {
+      const relMap = { serious: 'serious', dating: 'dating', casual: 'casual', enm: 'non_monogamy', non_monogamy: 'non_monogamy', open: 'open' }
+      const mapped = relMap[String(relationshipType)]
+      if (mapped) prefUpdates.relationshipType = mapped
+    }
+    if (photoBlurVisibility !== undefined && !Number.isNaN(Number(photoBlurVisibility))) {
+      prefUpdates.photoBlurVisibility = Math.max(0, Math.min(100, Math.round(Number(photoBlurVisibility))))
+    }
+
+    await db.transaction(async (tx) => {
+      if (Object.keys(prefUpdates).length > 0) {
+        await tx
+          .update(userDiscoverPreferences)
+          .set({ ...prefUpdates, updatedAt: new Date() })
+          .where(eq(userDiscoverPreferences.userId, userId))
+      }
+      const userSyncUpdates = {}
+      if (prefUpdates.maxDistance !== undefined) userSyncUpdates.searchRadius = prefUpdates.maxDistance
+      if (prefUpdates.minDistance !== undefined) userSyncUpdates.minRadius = prefUpdates.minDistance
+      if (prefUpdates.photoBlurVisibility !== undefined) userSyncUpdates.myBlur = prefUpdates.photoBlurVisibility
+      if (Object.keys(userSyncUpdates).length > 0) {
+        await tx.update(users).set({ ...userSyncUpdates, updatedAt: new Date() }).where(eq(users.id, userId))
+      }
+    })
+
+    const updated = await loadUserDetails(userId)
+    return res.json({ user: updated })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Preferences update failed' })
   }
 }
