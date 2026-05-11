@@ -27,8 +27,10 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.0",
     "jsonwebtoken": "^9.0.3",
+    "libphonenumber-js": "^1.13.1",
     "otplib": "^13.4.0",
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "twilio": "^6.0.2"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.10",

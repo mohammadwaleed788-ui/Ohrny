@@ -18,12 +18,8 @@ import {
   verifyUserRefreshToken,
   verifyUserSignupToken,
 } from '../../utils/jwt.js'
-
-function normalizePhone(country, nationalDigits) {
-  const c = String(country || '+1').trim() || '+1'
-  const digits = String(nationalDigits || '').replace(/\D/g, '')
-  return { phoneCountry: c.startsWith('+') ? c : `+${c}`, phone: digits }
-}
+import { normalizePhoneE164 } from '../../utils/phone.js'
+import { resolveOtpProvider, sendOtpWithProvider, verifyOtpWithProvider } from '../../services/otp/provider.js'
 
 async function loadUserDetails(userId) {
   const [account] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
@@ -64,10 +60,12 @@ async function issueTokens(accountId) {
 export async function sendOtp(req, res) {
   try {
     const { phone, phoneCountry, flow } = req.body || {}
-    const { phone: digits, phoneCountry: country } = normalizePhone(phoneCountry, phone)
-    if (digits.length < 8) {
+    const normalized = normalizePhoneE164(phoneCountry, phone)
+    if (!normalized) {
       return res.status(400).json({ error: 'Invalid phone number' })
     }
+    const { phone: digits, phoneCountry: country, phoneE164 } = normalized
+    const provider = resolveOtpProvider()
 
     const [existing] = await db
       .select({ id: users.id, isBanned: users.isBanned, deletedAt: users.deletedAt })
@@ -92,10 +90,9 @@ export async function sendOtp(req, res) {
       }
     }
 
-    const code = String(Math.floor(100000 + Math.random() * 900000))
-    const codeHash = await bcrypt.hash(code, 10)
     const now = new Date()
     const expiresAt = new Date(now.getTime() + 10 * 60 * 1000)
+    let codeHash = await bcrypt.hash(`otp:${provider}:${Date.now()}:${Math.random()}`, 10)
 
     await db.delete(phoneVerifications).where(lt(phoneVerifications.expiresAt, now))
 
@@ -110,6 +107,14 @@ export async function sendOtp(req, res) {
         ),
       )
 
+    if (provider === 'twilio') {
+      await sendOtpWithProvider(provider, phoneE164)
+    } else {
+      const code = String(Math.floor(100000 + Math.random() * 900000))
+      codeHash = await bcrypt.hash(code, 10)
+      console.info(`[mock SMS] OTP for ${phoneE164}: ${code}`)
+    }
+
     await db.insert(phoneVerifications).values({
       phone: digits,
       phoneCountry: country,
@@ -117,10 +122,11 @@ export async function sendOtp(req, res) {
       expiresAt,
     })
 
-    console.info(`[mock SMS] OTP for ${country}${digits}: ${code}`)
-
     return res.json({ ok: true, expiresIn: 600 })
   } catch (err) {
+    if (err?.status && err?.error) {
+      return res.status(err.status).json({ error: err.error })
+    }
     console.error(err)
     return res.status(500).json({ error: 'Failed to send code' })
   }
@@ -168,7 +174,12 @@ function isValidHandle(value) {
 export async function verifyOtp(req, res) {
   try {
     const { phone, phoneCountry, code } = req.body || {}
-    const { phone: digits, phoneCountry: country } = normalizePhone(phoneCountry, phone)
+    const normalized = normalizePhoneE164(phoneCountry, phone)
+    if (!normalized) {
+      return res.status(400).json({ error: 'Invalid phone number' })
+    }
+    const { phone: digits, phoneCountry: country, phoneE164 } = normalized
+    const provider = resolveOtpProvider()
     if (!code || String(code).length !== 6) {
       return res.status(400).json({ error: 'Invalid code' })
     }
@@ -209,13 +220,30 @@ export async function verifyOtp(req, res) {
       return res.status(429).json({ error: 'Too many attempts' })
     }
 
-    const match = await bcrypt.compare(String(code).trim(), row.codeHash)
-    if (!match) {
-      await db
-        .update(phoneVerifications)
-        .set({ attempts: row.attempts + 1 })
-        .where(eq(phoneVerifications.id, row.id))
-      return res.status(401).json({ error: 'Invalid code' })
+    if (provider === 'twilio') {
+      try {
+        await verifyOtpWithProvider(provider, phoneE164, String(code).trim())
+      } catch (error) {
+        if (error?.status === 401) {
+          await db
+            .update(phoneVerifications)
+            .set({ attempts: row.attempts + 1 })
+            .where(eq(phoneVerifications.id, row.id))
+        }
+        if (error?.status && error?.error) {
+          return res.status(error.status).json({ error: error.error })
+        }
+        throw error
+      }
+    } else {
+      const match = await bcrypt.compare(String(code).trim(), row.codeHash)
+      if (!match) {
+        await db
+          .update(phoneVerifications)
+          .set({ attempts: row.attempts + 1 })
+          .where(eq(phoneVerifications.id, row.id))
+        return res.status(401).json({ error: 'Invalid code' })
+      }
     }
 
     await db
@@ -262,6 +290,9 @@ export async function verifyOtp(req, res) {
       expiresIn: 900,
     })
   } catch (err) {
+    if (err?.status && err?.error) {
+      return res.status(err.status).json({ error: err.error })
+    }
     console.error(err)
     return res.status(500).json({ error: 'Verification failed' })
   }
