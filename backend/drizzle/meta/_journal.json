@@ -15,6 +15,13 @@
       "when": 1778073992784,
       "tag": "0001_narrow_viper",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778498471543,
+      "tag": "0002_silky_firestar",
+      "breakpoints": true
     }
   ]
 }
