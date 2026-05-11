@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import {
   S3_BUCKET_NAME,
@@ -24,4 +24,10 @@ export async function generateSignedUploadUrl(key, contentType, expiresIn = S3_U
     ContentType: contentType,
   })
   return getSignedUrl(s3, command, { expiresIn })
+}
+
+export async function deleteS3Object(key) {
+  if (!S3_BUCKET_NAME) throw new Error('S3_BUCKET_NAME is not configured')
+  const command = new DeleteObjectCommand({ Bucket: S3_BUCKET_NAME, Key: key })
+  return s3.send(command)
 }

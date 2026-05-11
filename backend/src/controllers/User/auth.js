@@ -10,6 +10,7 @@ import {
 } from '../../../db/schema/users.js'
 import { phoneVerifications } from '../../../db/schema/safety.js'
 import { userPrivacySettings, userDiscoverPreferences } from '../../../db/schema/settings.js'
+import { userDevices } from '../../../db/schema/userDevices.js'
 import {
   signAccessTokenUser,
   signRefreshTokenUser,
@@ -28,13 +29,14 @@ async function loadUserDetails(userId) {
   const [account] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!account) return null
 
-  const [lifestyle, privacySettings, discoverPreferences, photos, prompts, interests] = await Promise.all([
+  const [lifestyle, privacySettings, discoverPreferences, photos, prompts, interests, devices] = await Promise.all([
     db.select().from(userLifestyle).where(eq(userLifestyle.userId, userId)).limit(1).then((rows) => rows[0] || null),
     db.select().from(userPrivacySettings).where(eq(userPrivacySettings.userId, userId)).limit(1).then((rows) => rows[0] || null),
     db.select().from(userDiscoverPreferences).where(eq(userDiscoverPreferences.userId, userId)).limit(1).then((rows) => rows[0] || null),
     db.select().from(userPhotos).where(eq(userPhotos.userId, userId)),
     db.select().from(userPrompts).where(eq(userPrompts.userId, userId)),
     db.select().from(userInterests).where(eq(userInterests.userId, userId)),
+    db.select().from(userDevices).where(eq(userDevices.userId, userId)),
   ])
 
   return {
@@ -45,6 +47,7 @@ async function loadUserDetails(userId) {
     photos: photos.sort((a, b) => a.position - b.position),
     prompts: prompts.sort((a, b) => a.position - b.position),
     interests: interests.sort((a, b) => a.position - b.position),
+    devices: devices.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)),
   }
 }
 
@@ -507,6 +510,7 @@ export async function updateProfile(req, res) {
       lifestyle,
       interests,
       prompts,
+      photos,
     } = req.body || {}
 
     const userUpdates = {}
@@ -584,6 +588,25 @@ export async function updateProfile(req, res) {
                 updatedAt: new Date(),
               },
             })
+        }
+      }
+
+      if (Array.isArray(photos) && photos.length > 0) {
+        const validPhotos = photos
+          .filter((p) => p?.storageKey && typeof p.storageKey === 'string')
+          .slice(0, 6)
+        if (validPhotos.length > 0) {
+          await tx.delete(userPhotos).where(eq(userPhotos.userId, userId))
+          await tx.insert(userPhotos).values(
+            validPhotos.map((p, i) => ({
+              userId,
+              position: Number(p.position) || i + 1,
+              storageKey: p.storageKey,
+              isBlurred: p.isBlurred ?? false,
+              blurAmount: p.isBlurred ? (Number(p.blurAmount) || 70) : 0,
+              isMain: (Number(p.position) || i + 1) === 1,
+            })),
+          )
         }
       }
     })
