@@ -14,7 +14,14 @@ function getClient() {
   return client
 }
 
-function mapTwilioError(err) {
+function mapTwilioSendError(err) {
+  const status = Number(err?.status) || 500
+  if (status === 429) return { status: 429, error: 'Too many attempts, try later' }
+  if (status >= 400 && status < 500) return { status: 500, error: 'Failed to send code' }
+  return { status: 500, error: 'Failed to send code' }
+}
+
+function mapTwilioCheckError(err) {
   const status = Number(err?.status) || 500
   if (status === 429) return { status: 429, error: 'Too many attempts, try later' }
   if (status >= 400 && status < 500) return { status: 401, error: 'Invalid code' }
@@ -29,7 +36,7 @@ export async function sendVerification(phoneE164) {
       channel: 'sms',
     })
   } catch (err) {
-    throw mapTwilioError(err)
+    throw mapTwilioSendError(err)
   }
 }
 
@@ -46,6 +53,6 @@ export async function checkVerification(phoneE164, code) {
     }
   } catch (err) {
     if (err?.status && err?.error) throw err
-    throw mapTwilioError(err)
+    throw mapTwilioCheckError(err)
   }
 }
