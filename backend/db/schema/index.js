@@ -12,3 +12,4 @@ export * from './messaging.js';
 export * from './subscriptions.js';
 export * from './safety.js';
 export * from './admin.js';
+export * from './userDevices.js';
