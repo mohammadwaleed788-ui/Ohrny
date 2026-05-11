@@ -1,10 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
 import {
   ChevronLeft,
   ChevronRight,
-  Check,
   DollarSign,
-  ExternalLink,
   Flag,
   FlaskConical,
   Heart,
@@ -64,63 +61,13 @@ const ICONS = {
 }
 
 function WorkspaceSwitcher({ collapsed }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-
-  useEffect(() => {
-    function onDocClick(event) {
-      if (ref.current && !ref.current.contains(event.target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [])
-
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        className={`flex w-full items-center gap-2 border-b ${adminTokens.borderSoft} px-4 py-4 text-left`}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <div className="h-7 w-7 rounded-md bg-gradient-to-br from-orange-300 to-orange-600" />
+    <div className={`flex items-center gap-2 border-b ${adminTokens.borderSoft} px-4 py-4`}>
+      <div className="h-7 w-7 rounded-md bg-gradient-to-br from-orange-300 to-orange-600" />
       {!collapsed && (
         <div className="min-w-0 flex-1">
           <div className={`truncate text-sm font-semibold ${adminTokens.text}`}>Ohrny admin</div>
-          <div className={`truncate font-mono text-[11px] ${adminTokens.textMute}`}>switch workspace</div>
-        </div>
-      )}
-      {!collapsed && <ChevronRight className={`h-3 w-3 ${adminTokens.textMute}`} />}
-      </button>
-
-      {open && !collapsed && (
-        <div
-          className={`absolute left-2 right-2 top-[calc(100%+4px)] z-50 rounded-xl border ${adminTokens.borderStrong} ${adminTokens.bgElev} p-2 shadow-2xl`}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className={`px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${adminTokens.textMute}`}>Workspaces</div>
-          <div className={`mb-1 flex items-center gap-2 rounded-md ${adminTokens.accentBg} px-2 py-2`}>
-            <div className="grid h-7 w-7 place-items-center rounded-md bg-indigo-600/60 text-white">
-              <LayoutDashboard className="h-3.5 w-3.5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className={`text-sm ${adminTokens.text}`}>Admin console</div>
-              <div className={`truncate text-[11px] ${adminTokens.textMute}`}>Analytics · ops · users · trust</div>
-            </div>
-            <Check className={`h-3.5 w-3.5 ${adminTokens.textDim}`} />
-          </div>
-          <div className="mb-1 flex items-center gap-2 rounded-md px-2 py-2 hover:bg-[oklch(0.26_0.014_260)]">
-            <div className="grid h-7 w-7 place-items-center rounded-md bg-orange-500/60 text-white">
-              <Heart className="h-3.5 w-3.5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className={`text-sm ${adminTokens.text}`}>Operated profiles</div>
-              <div className={`truncate text-[11px] ${adminTokens.textMute}`}>Company personas · engage with users</div>
-            </div>
-            <ExternalLink className={`h-3 w-3 ${adminTokens.textMute}`} />
-          </div>
-          <div className={`border-t ${adminTokens.borderSoft} px-2 pt-2 text-[10.5px] ${adminTokens.textMute}`}>Opens in a new window</div>
+          <div className={`truncate font-mono text-[11px] ${adminTokens.textMute}`}>admin console</div>
         </div>
       )}
     </div>
@@ -177,7 +124,7 @@ export function AdminSidebar({
         {!collapsed && (
           <div className="min-w-0 flex-1">
             <div className={`truncate text-xs font-semibold ${adminTokens.text}`}>Elena M.</div>
-            <div className={`truncate font-mono text-[11px] ${adminTokens.textMute}`}>founder · admin</div>
+            <div className={`truncate font-mono text-[11px] ${adminTokens.textMute}`}>founder - admin</div>
           </div>
         )}
         <button
@@ -192,4 +139,3 @@ export function AdminSidebar({
     </aside>
   )
 }
-

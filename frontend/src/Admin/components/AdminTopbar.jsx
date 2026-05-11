@@ -18,18 +18,7 @@ export function AdminTopbar({
         ))}
       </div>
 
-      <span className="rounded border border-[oklch(0.82_0.14_80_/_0.3)] bg-[oklch(0.82_0.14_80_/_0.14)] px-2 py-0.5 font-mono text-[11px] text-[oklch(0.82_0.14_80)]">
-        production · us-east-1
-      </span>
       <div className="ml-auto flex items-center gap-2">
-        <button
-          type="button"
-          className={`inline-flex items-center gap-1 rounded-md border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2.5 py-1 text-xs ${adminTokens.textDim} hover:bg-[oklch(0.26_0.014_260)]`}
-          onClick={onToggleAnon}
-        >
-          <Shield className="h-3.5 w-3.5" />
-          {anon ? 'Anon · on' : 'Anon · off'}
-        </button>
 
         <div className={`flex min-w-[320px] items-center gap-2 rounded-md border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-3 py-1.5 ${adminTokens.textDim}`}>
           <Search className="h-4 w-4" />
