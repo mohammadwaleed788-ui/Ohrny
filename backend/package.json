@@ -12,7 +12,8 @@
     "db:push": "drizzle-kit push",
     "migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "node db/seed.js"
+    "db:seed": "node db/seed.js",
+    "db:seed:discovery": "node db/seed.js --discovery-only"
   },
   "keywords": [],
   "author": "",
