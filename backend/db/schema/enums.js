@@ -30,7 +30,7 @@ export const relStatusEnum = pgEnum('rel_status', [
 
 // ─── Discovery ────────────────────────────────────────────────────────────────
 export const discoverRelTypeEnum = pgEnum('discover_rel_type', [
-  'serious', 'dating', 'casual', 'non_monogamy', 'open',
+  'serious', 'dating', 'casual', 'non_monogamy', 'friends', 'figuring_out', 'open',
 ]);
 
 // ─── Matching / Liking ────────────────────────────────────────────────────────

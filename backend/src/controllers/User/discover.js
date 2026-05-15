@@ -1,6 +1,6 @@
-import { sql, inArray } from 'drizzle-orm'
+import { sql, inArray, and, isNull, asc, desc } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
-import { users, userPhotos, userPrompts, userInterests } from '../../../db/schema/users.js'
+import { users, userPhotos, userPrompts, userInterests, userLifestyle } from '../../../db/schema/users.js'
 import { userDiscoverPreferences } from '../../../db/schema/settings.js'
 
 const DEFAULT_LIMIT = 20
@@ -29,10 +29,25 @@ function encodeCursor(distance, id) {
   return Buffer.from(`${distance}|${id}`, 'utf8').toString('base64url')
 }
 
+const ALL_REL_GOALS = ['casual', 'dating', 'serious', 'non_monogamy', 'friends', 'figuring_out']
+
 function mapRelationshipPreference(relType) {
   const value = String(relType || 'dating')
-  if (value === 'open') return ['non_monogamy']
+  if (value === 'open') return ALL_REL_GOALS
+  if (value === 'enm') return ['non_monogamy']
+  if (value === 'unsure') return ['figuring_out']
   return [value]
+}
+
+// Group an array of rows by a key field
+function groupBy(rows, key) {
+  const map = {}
+  for (const row of rows) {
+    const k = row[key]
+    if (!map[k]) map[k] = []
+    map[k].push(row)
+  }
+  return map
 }
 
 export async function getDiscoverCards(req, res) {
@@ -45,6 +60,7 @@ export async function getDiscoverCards(req, res) {
         id: users.id,
         latApprox: users.latApprox,
         lngApprox: users.lngApprox,
+        orientation: users.orientation,
       })
       .from(users)
       .where(sql`${users.id} = ${req.user.id}`)
@@ -80,23 +96,18 @@ export async function getDiscoverCards(req, res) {
     const latPattern = '^-?[0-9]+(\\.[0-9]+)?$'
     const lngPattern = '^-?[0-9]+(\\.[0-9]+)?$'
 
-    const viewerPointSql = sql`ST_SetSRID(
-      ST_MakePoint(
-        CAST(${currentUser.lngApprox} AS double precision),
-        CAST(${currentUser.latApprox} AS double precision)
-      ),
-      4326
-    )::geography`
-
-    const candidatePointSql = sql`ST_SetSRID(
-      ST_MakePoint(
-        CAST(${users.lngApprox} AS double precision),
-        CAST(${users.latApprox} AS double precision)
-      ),
-      4326
-    )::geography`
-
-    const distanceMetersSql = sql`ST_Distance(${viewerPointSql}, ${candidatePointSql})`
+    const vLat = currentUser.latApprox
+    const vLng = currentUser.lngApprox
+    const distanceMetersSql = sql`(
+      6371000.0 * 2.0 * asin(
+        least(1.0, sqrt(
+          power(sin((radians(CAST(${users.latApprox} AS double precision)) - radians(CAST(${vLat} AS double precision))) / 2.0), 2) +
+          cos(radians(CAST(${vLat} AS double precision))) *
+          cos(radians(CAST(${users.latApprox} AS double precision))) *
+          power(sin((radians(CAST(${users.lngApprox} AS double precision)) - radians(CAST(${vLng} AS double precision))) / 2.0), 2)
+        ))
+      )
+    )`
     const distanceMilesSql = sql`(${distanceMetersSql} / 1609.344)`
     const minMeters = safeMinDistance * 1609.344
     const maxMeters = maxDistance * 1609.344
@@ -113,9 +124,23 @@ export async function getDiscoverCards(req, res) {
       sql`${currentUser.lngApprox} ~ ${lngPattern}`,
       sql`${users.latApprox} ~ ${latPattern}`,
       sql`${users.lngApprox} ~ ${lngPattern}`,
-      sql`ST_DWithin(${viewerPointSql}, ${candidatePointSql}, ${maxMeters})`,
+      sql`${distanceMetersSql} <= ${maxMeters}`,
       sql`${distanceMetersSql} >= ${minMeters}`,
     ]
+
+    // Gender filter — map orientation ('women','men','nonbinary') → iam ('woman','man','nonbinary')
+    const orientationList = Array.isArray(currentUser.orientation) ? currentUser.orientation : []
+    const wantsEveryone = orientationList.length === 0 || orientationList.includes('everyone')
+    if (!wantsEveryone) {
+      const iamTargets = [...new Set(
+        orientationList
+          .map(o => o === 'women' ? 'woman' : o === 'men' ? 'man' : o)
+          .filter(o => ['woman', 'man', 'nonbinary', 'other'].includes(o))
+      )]
+      if (iamTargets.length > 0) {
+        whereParts.push(inArray(users.iam, iamTargets))
+      }
+    }
 
     if (cursor) {
       whereParts.push(
@@ -123,6 +148,7 @@ export async function getDiscoverCards(req, res) {
       )
     }
 
+    // ── Step 1: fetch the user rows (no subqueries) ──────────────────────────
     const rows = await db
       .select({
         id: users.id,
@@ -131,40 +157,12 @@ export async function getDiscoverCards(req, res) {
         pronouns: users.pronouns,
         looking: users.looking,
         relationshipGoal: users.relationshipGoal,
+        relStatus: users.relStatus,
+        bio: users.bio,
+        aboutMe: users.aboutMe,
+        city: users.city,
         verified: users.idVerified,
         distanceMiles: distanceMilesSql,
-        mainPhoto: sql`(
-          select ${userPhotos.storageKey}
-          from ${userPhotos}
-          where ${userPhotos.userId} = ${users.id}
-            and ${userPhotos.deletedAt} is null
-          order by ${userPhotos.isMain} desc, ${userPhotos.position} asc
-          limit 1
-        )`,
-        promptTitle: sql`(
-          select ${userPrompts.title}
-          from ${userPrompts}
-          where ${userPrompts.userId} = ${users.id}
-          order by ${userPrompts.position} asc
-          limit 1
-        )`,
-        promptAnswer: sql`(
-          select ${userPrompts.answer}
-          from ${userPrompts}
-          where ${userPrompts.userId} = ${users.id}
-          order by ${userPrompts.position} asc
-          limit 1
-        )`,
-        interests: sql`coalesce((
-          select array_agg(interest_row.interest order by interest_row.position asc)
-          from (
-            select ${userInterests.interest}, ${userInterests.position}
-            from ${userInterests}
-            where ${userInterests.userId} = ${users.id}
-            order by ${userInterests.position} asc
-            limit 6
-          ) as interest_row
-        ), '{}'::text[])`,
       })
       .from(users)
       .where(sql.join(whereParts, sql` and `))
@@ -174,36 +172,103 @@ export async function getDiscoverCards(req, res) {
     const hasMore = rows.length > limit
     const sliced = hasMore ? rows.slice(0, limit) : rows
 
+    if (sliced.length === 0) {
+      return res.json({ cards: [], nextCursor: null, hasMore: false })
+    }
+
+    // ── Step 2: batch-fetch all related data for these user IDs ──────────────
+    const userIds = sliced.map((r) => r.id)
+
+    const [allPhotos, allPrompts, allInterests, allLifestyles] = await Promise.all([
+      db
+        .select()
+        .from(userPhotos)
+        .where(and(inArray(userPhotos.userId, userIds), isNull(userPhotos.deletedAt)))
+        .orderBy(desc(userPhotos.isMain), asc(userPhotos.position)),
+      db
+        .select()
+        .from(userPrompts)
+        .where(inArray(userPrompts.userId, userIds))
+        .orderBy(asc(userPrompts.position)),
+      db
+        .select()
+        .from(userInterests)
+        .where(inArray(userInterests.userId, userIds))
+        .orderBy(asc(userInterests.position)),
+      db
+        .select()
+        .from(userLifestyle)
+        .where(inArray(userLifestyle.userId, userIds)),
+    ])
+
+    // ── Step 3: group related rows by userId ─────────────────────────────────
+    const photosByUser    = groupBy(allPhotos, 'userId')
+    const promptsByUser   = groupBy(allPrompts, 'userId')
+    const interestsByUser = groupBy(allInterests, 'userId')
+    const lifestyleByUser = {}
+    for (const ls of allLifestyles) lifestyleByUser[ls.userId] = ls
+
+    // ── Step 4: build the final card objects ─────────────────────────────────
     const cards = sliced.map((row) => {
       const distanceMiles = Number(row.distanceMiles)
+      const photos = (photosByUser[row.id] || []).slice(0, 6).map((p) => ({
+        id: p.id,
+        storageKey: p.storageKey,
+        position: p.position,
+        isMain: p.isMain,
+        isBlurred: p.isBlurred,
+        blurAmount: p.blurAmount,
+      }))
+      const prompts = (promptsByUser[row.id] || []).slice(0, 3).map((p) => ({
+        position: p.position,
+        title: p.title,
+        answer: p.answer,
+      }))
+      const interests = (interestsByUser[row.id] || [])
+        .slice(0, 6)
+        .map((i) => i.interest)
+      const lifestyle = lifestyleByUser[row.id]
+        ? {
+            height:    lifestyleByUser[row.id].height    ?? null,
+            drinks:    lifestyleByUser[row.id].drinks    ?? null,
+            smokes:    lifestyleByUser[row.id].smokes    ?? null,
+            kids:      lifestyleByUser[row.id].kids      ?? null,
+            pets:      lifestyleByUser[row.id].pets      ?? null,
+            diet:      lifestyleByUser[row.id].diet      ?? null,
+            exercise:  lifestyleByUser[row.id].exercise  ?? null,
+            religion:  lifestyleByUser[row.id].religion  ?? null,
+            education: lifestyleByUser[row.id].education ?? null,
+            zodiac:    lifestyleByUser[row.id].zodiac    ?? null,
+          }
+        : null
+
       return {
         id: row.id,
         handle: row.handle,
         age: row.age,
-        pronouns: row.pronouns,
-        looking: row.looking,
-        relationshipGoal: row.relationshipGoal,
+        pronouns: row.pronouns ?? null,
+        looking: row.looking ?? null,
+        relStatus: row.relStatus ?? null,
+        relationshipGoal: row.relationshipGoal ?? null,
+        bio: row.bio ?? null,
+        aboutMe: row.aboutMe ?? null,
+        city: row.city ?? null,
         verified: Boolean(row.verified),
         distanceMiles: Number(distanceMiles.toFixed(2)),
         distanceLabel: `${Math.max(1, Math.round(distanceMiles))} mi`,
-        mainPhoto: row.mainPhoto,
-        prompt: row.promptTitle || row.promptAnswer
-          ? { title: row.promptTitle, answer: row.promptAnswer }
-          : null,
-        interests: Array.isArray(row.interests) ? row.interests : [],
+        interests,
+        photos,
+        prompts,
+        lifestyle,
       }
     })
 
-    const last = cards[cards.length - 1]
-    const nextCursor = hasMore && last
-      ? encodeCursor(last.distanceMiles, last.id)
+    const lastRaw = sliced[sliced.length - 1]
+    const nextCursor = hasMore && lastRaw
+      ? encodeCursor(Number(lastRaw.distanceMiles), lastRaw.id)
       : null
 
-    return res.json({
-      cards,
-      nextCursor,
-      hasMore,
-    })
+    return res.json({ cards, nextCursor, hasMore })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed to load discovery cards' })

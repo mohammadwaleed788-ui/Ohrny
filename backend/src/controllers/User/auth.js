@@ -535,6 +535,8 @@ export async function updateProfile(req, res) {
       pronouns,
       looking,
       work,
+      iam,
+      iamOther,
       orientation,
       relStatus,
       relationshipGoal,
@@ -542,6 +544,9 @@ export async function updateProfile(req, res) {
       interests,
       prompts,
       photos,
+      lat,
+      lng,
+      city,
     } = req.body || {}
 
     const userUpdates = {}
@@ -549,6 +554,10 @@ export async function updateProfile(req, res) {
     if (pronouns !== undefined) userUpdates.pronouns = pronouns ? String(pronouns).trim().slice(0, 40) : null
     if (looking !== undefined) userUpdates.looking = looking ? String(looking).trim().slice(0, 120) : null
     if (work !== undefined) userUpdates.work = work ? String(work).trim().slice(0, 120) : null
+    if (iam !== undefined && ['woman', 'man', 'nonbinary', 'other'].includes(String(iam))) {
+      userUpdates.iam = String(iam)
+      userUpdates.iamOther = iam === 'other' ? String(iamOther || '').trim().slice(0, 60) : null
+    }
     if (Array.isArray(orientation) && orientation.length > 0) {
       userUpdates.orientation = orientation.map((x) => String(x))
     }
@@ -559,6 +568,16 @@ export async function updateProfile(req, res) {
     if (relationshipGoal !== undefined) {
       const mapped = mapRelationshipGoal(relationshipGoal)
       if (mapped) userUpdates.relationshipGoal = mapped
+    }
+    if (lat != null && !Number.isNaN(Number(lat))) {
+      userUpdates.latApprox = String(Math.round(Number(lat) * 100) / 100)
+      userUpdates.locationGranted = true
+    }
+    if (lng != null && !Number.isNaN(Number(lng))) {
+      userUpdates.lngApprox = String(Math.round(Number(lng) * 100) / 100)
+    }
+    if (city !== undefined) {
+      userUpdates.city = city ? String(city).trim().slice(0, 100) : null
     }
 
     await db.transaction(async (tx) => {
@@ -723,7 +742,7 @@ export async function updatePreferences(req, res) {
       prefUpdates.ageMax = Math.max(18, Math.min(99, Math.round(Number(ageMax))))
     }
     if (relationshipType !== undefined) {
-      const relMap = { serious: 'serious', dating: 'dating', casual: 'casual', enm: 'non_monogamy', non_monogamy: 'non_monogamy', open: 'open' }
+      const relMap = { serious: 'serious', dating: 'dating', casual: 'casual', enm: 'non_monogamy', non_monogamy: 'non_monogamy', friends: 'friends', unsure: 'figuring_out', figuring_out: 'figuring_out', open: 'open' }
       const mapped = relMap[String(relationshipType)]
       if (mapped) prefUpdates.relationshipType = mapped
     }
