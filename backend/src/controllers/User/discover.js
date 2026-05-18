@@ -1,7 +1,10 @@
-import { sql, inArray, and, isNull, asc, desc } from 'drizzle-orm'
+import { sql, inArray, and, isNull, asc, desc, eq } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { users, userPhotos, userPrompts, userInterests, userLifestyle } from '../../../db/schema/users.js'
 import { userDiscoverPreferences } from '../../../db/schema/settings.js'
+import { likes, matches } from '../../../db/schema/matching.js'
+import { blocks } from '../../../db/schema/safety.js'
+import { notifyNewLike, notifyNewMatch } from '../../services/notifications/likeNotification.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -48,6 +51,12 @@ function groupBy(rows, key) {
     map[k].push(row)
   }
   return map
+}
+
+function sortPair(user1, user2) {
+  return String(user1) < String(user2)
+    ? { userAId: user1, userBId: user2 }
+    : { userAId: user2, userBId: user1 }
 }
 
 export async function getDiscoverCards(req, res) {
@@ -272,5 +281,129 @@ export async function getDiscoverCards(req, res) {
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed to load discovery cards' })
+  }
+}
+
+export async function swipeDiscoverCard(req, res) {
+  try {
+    const fromUserId = req.user.id
+    const { toUserId, type } = req.body || {}
+    if (!toUserId || typeof toUserId !== 'string') {
+      return res.status(400).json({ error: 'toUserId required' })
+    }
+    if (!['pass', 'like', 'super_like'].includes(type)) {
+      return res.status(400).json({ error: 'Invalid swipe type' })
+    }
+    if (toUserId === fromUserId) {
+      return res.status(400).json({ error: 'Cannot swipe yourself' })
+    }
+
+    const [target] = await db
+      .select({
+        id: users.id,
+        isBanned: users.isBanned,
+        isPaused: users.isPaused,
+        deletedAt: users.deletedAt,
+      })
+      .from(users)
+      .where(eq(users.id, toUserId))
+      .limit(1)
+
+    if (!target || target.isBanned || target.isPaused || target.deletedAt) {
+      return res.status(404).json({ error: 'User not available' })
+    }
+
+    const [blocked] = await db
+      .select({ id: blocks.id })
+      .from(blocks)
+      .where(
+        sql`(${blocks.blockerId} = ${fromUserId} and ${blocks.blockedId} = ${toUserId})
+          or (${blocks.blockerId} = ${toUserId} and ${blocks.blockedId} = ${fromUserId})`,
+      )
+      .limit(1)
+    if (blocked) {
+      return res.status(403).json({ error: 'Interaction not allowed' })
+    }
+
+    const now = new Date()
+    await db
+      .insert(likes)
+      .values({
+        fromUserId,
+        toUserId,
+        type,
+        matchId: null,
+        seenAt: type === 'pass' ? now : null,
+        createdAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [likes.fromUserId, likes.toUserId],
+        set: {
+          type,
+          matchId: null,
+          seenAt: type === 'pass' ? now : null,
+          createdAt: now,
+        },
+      })
+
+    if (type === 'pass') {
+      return res.json({ ok: true, swipeType: type, matched: false })
+    }
+
+    notifyNewLike(toUserId, type === 'super_like')
+
+    const [reciprocal] = await db
+      .select({ id: likes.id })
+      .from(likes)
+      .where(
+        and(
+          eq(likes.fromUserId, toUserId),
+          eq(likes.toUserId, fromUserId),
+          inArray(likes.type, ['like', 'super_like']),
+        ),
+      )
+      .limit(1)
+
+    if (!reciprocal) {
+      return res.json({ ok: true, swipeType: type, matched: false })
+    }
+
+    const pair = sortPair(fromUserId, toUserId)
+    const [matchRow] = await db
+      .insert(matches)
+      .values({
+        userAId: pair.userAId,
+        userBId: pair.userBId,
+        isActive: true,
+        unmatchedAt: null,
+        unmatchedByUserId: null,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [matches.userAId, matches.userBId],
+        set: {
+          isActive: true,
+          unmatchedAt: null,
+          unmatchedByUserId: null,
+          updatedAt: now,
+        },
+      })
+      .returning({ id: matches.id })
+
+    await db
+      .update(likes)
+      .set({ matchId: matchRow.id })
+      .where(
+        sql`(${likes.fromUserId} = ${fromUserId} and ${likes.toUserId} = ${toUserId})
+            or (${likes.fromUserId} = ${toUserId} and ${likes.toUserId} = ${fromUserId})`,
+      )
+
+    notifyNewMatch(toUserId)
+    notifyNewMatch(fromUserId)
+
+    return res.json({ ok: true, swipeType: type, matched: true, matchId: matchRow.id })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Failed to save swipe' })
   }
 }

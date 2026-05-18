@@ -27,6 +27,7 @@
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.0",
+    "firebase-admin": "^13.10.0",
     "jsonwebtoken": "^9.0.3",
     "libphonenumber-js": "^1.13.1",
     "otplib": "^13.4.0",

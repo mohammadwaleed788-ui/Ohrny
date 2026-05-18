@@ -16,6 +16,7 @@ export const likes = pgTable('likes', {
 
   // If this like completed a mutual match, point to that match row.
   matchId:      uuid('match_id'),
+  seenAt:       timestamp('seen_at', { withTimezone: true }),
 
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
