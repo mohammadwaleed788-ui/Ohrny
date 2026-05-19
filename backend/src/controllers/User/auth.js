@@ -726,6 +726,7 @@ export async function updatePreferences(req, res) {
       ageMax,
       relationshipType,
       photoBlurVisibility,
+      globalMode,
     } = req.body || {}
 
     const prefUpdates = {}
@@ -748,6 +749,9 @@ export async function updatePreferences(req, res) {
     }
     if (photoBlurVisibility !== undefined && !Number.isNaN(Number(photoBlurVisibility))) {
       prefUpdates.photoBlurVisibility = Math.max(0, Math.min(100, Math.round(Number(photoBlurVisibility))))
+    }
+    if (globalMode !== undefined) {
+      prefUpdates.globalMode = Boolean(globalMode)
     }
 
     await db.transaction(async (tx) => {

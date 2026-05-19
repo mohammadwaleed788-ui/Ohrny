@@ -63,6 +63,8 @@ export async function getDiscoverCards(req, res) {
   try {
     const limit = clampInt(req.query.limit, 1, MAX_LIMIT, DEFAULT_LIMIT)
     const cursor = decodeCursor(req.query.cursor)
+    // When true (sent by "Start again"): re-show passed users but still hide liked ones
+    const resetPasses = req.query.resetPasses === 'true'
 
     const currentUserRows = await db
       .select({
@@ -87,12 +89,14 @@ export async function getDiscoverCards(req, res) {
         ageMin: userDiscoverPreferences.ageMin,
         ageMax: userDiscoverPreferences.ageMax,
         relationshipType: userDiscoverPreferences.relationshipType,
+        globalMode: userDiscoverPreferences.globalMode,
       })
       .from(userDiscoverPreferences)
       .where(sql`${userDiscoverPreferences.userId} = ${req.user.id}`)
       .limit(1)
 
     const prefs = prefsRows[0] || {}
+    const globalMode = Boolean(prefs.globalMode)
     const maxDistance = clampInt(prefs.maxDistance, 1, 200, 25)
     const minDistance = clampInt(prefs.minDistance, 0, 100, 0)
     const ageMin = clampInt(prefs.ageMin, 18, 99, 18)
@@ -121,7 +125,9 @@ export async function getDiscoverCards(req, res) {
     const minMeters = safeMinDistance * 1609.344
     const maxMeters = maxDistance * 1609.344
 
-    const whereParts = [
+    // Base conditions shared by both the main query and the exhausted check.
+    // Does NOT include swipe-history exclusion or cursor so we can reuse it.
+    const baseWhereParts = [
       sql`${users.id} <> ${req.user.id}`,
       sql`${users.isBanned} = false`,
       sql`${users.isPaused} = false`,
@@ -129,13 +135,18 @@ export async function getDiscoverCards(req, res) {
       sql`${users.age} >= ${safeAgeMin}`,
       sql`${users.age} <= ${safeAgeMax}`,
       inArray(users.relationshipGoal, relationshipTargets),
-      sql`${currentUser.latApprox} ~ ${latPattern}`,
-      sql`${currentUser.lngApprox} ~ ${lngPattern}`,
-      sql`${users.latApprox} ~ ${latPattern}`,
-      sql`${users.lngApprox} ~ ${lngPattern}`,
-      sql`${distanceMetersSql} <= ${maxMeters}`,
-      sql`${distanceMetersSql} >= ${minMeters}`,
     ]
+
+    if (!globalMode) {
+      baseWhereParts.push(
+        sql`${currentUser.latApprox} ~ ${latPattern}`,
+        sql`${currentUser.lngApprox} ~ ${lngPattern}`,
+        sql`${users.latApprox} ~ ${latPattern}`,
+        sql`${users.lngApprox} ~ ${lngPattern}`,
+        sql`${distanceMetersSql} <= ${maxMeters}`,
+        sql`${distanceMetersSql} >= ${minMeters}`,
+      )
+    }
 
     // Gender filter — map orientation ('women','men','nonbinary') → iam ('woman','man','nonbinary')
     const orientationList = Array.isArray(currentUser.orientation) ? currentUser.orientation : []
@@ -147,17 +158,50 @@ export async function getDiscoverCards(req, res) {
           .filter(o => ['woman', 'man', 'nonbinary', 'other'].includes(o))
       )]
       if (iamTargets.length > 0) {
-        whereParts.push(inArray(users.iam, iamTargets))
+        baseWhereParts.push(inArray(users.iam, iamTargets))
       }
     }
 
-    if (cursor) {
+    // Full query = base + swipe-history exclusion + cursor
+    const whereParts = [...baseWhereParts]
+
+    // Exclude users already swiped. On "start again" (resetPasses=true) only
+    // liked/super_liked users are hidden; passed users re-enter the deck.
+    if (resetPasses) {
       whereParts.push(
-        sql`(${distanceMilesSql} > ${cursor.distance} OR (${distanceMilesSql} = ${cursor.distance} AND ${users.id} > ${cursor.id}))`,
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${likes} sl
+          WHERE sl.from_user_id = ${req.user.id}
+            AND sl.to_user_id = ${users.id}
+            AND sl.type IN ('like', 'super_like')
+        )`,
+      )
+    } else {
+      whereParts.push(
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${likes} sl
+          WHERE sl.from_user_id = ${req.user.id}
+            AND sl.to_user_id = ${users.id}
+        )`,
       )
     }
 
+    if (cursor) {
+      if (globalMode) {
+        whereParts.push(sql`${users.id} > ${cursor.id}`)
+      } else {
+        whereParts.push(
+          sql`(${distanceMilesSql} > ${cursor.distance} OR (${distanceMilesSql} = ${cursor.distance} AND ${users.id} > ${cursor.id}))`,
+        )
+      }
+    }
+
     // ── Step 1: fetch the user rows (no subqueries) ──────────────────────────
+    const distanceSelectSql = globalMode ? sql`null` : distanceMilesSql
+    const orderByClause = globalMode
+      ? [asc(users.id)]
+      : [sql`${distanceMilesSql} asc`, asc(users.id)]
+
     const rows = await db
       .select({
         id: users.id,
@@ -171,18 +215,30 @@ export async function getDiscoverCards(req, res) {
         aboutMe: users.aboutMe,
         city: users.city,
         verified: users.idVerified,
-        distanceMiles: distanceMilesSql,
+        distanceMiles: distanceSelectSql,
       })
       .from(users)
       .where(sql.join(whereParts, sql` and `))
-      .orderBy(sql`${distanceMilesSql} asc`, users.id)
+      .orderBy(...orderByClause)
       .limit(limit + 1)
 
     const hasMore = rows.length > limit
     const sliced = hasMore ? rows.slice(0, limit) : rows
 
     if (sliced.length === 0) {
-      return res.json({ cards: [], nextCursor: null, hasMore: false })
+      // Check if there are any matching users ignoring swipe history.
+      // If yes → passes exhausted. If no → genuinely nobody nearby.
+      const anyMatch = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(sql.join(baseWhereParts, sql` and `))
+        .limit(1)
+      return res.json({
+        cards: [],
+        nextCursor: null,
+        hasMore: false,
+        exhausted: anyMatch.length > 0,
+      })
     }
 
     // ── Step 2: batch-fetch all related data for these user IDs ──────────────
@@ -219,7 +275,7 @@ export async function getDiscoverCards(req, res) {
 
     // ── Step 4: build the final card objects ─────────────────────────────────
     const cards = sliced.map((row) => {
-      const distanceMiles = Number(row.distanceMiles)
+      const distanceMiles = row.distanceMiles != null ? Number(row.distanceMiles) : null
       const photos = (photosByUser[row.id] || []).slice(0, 6).map((p) => ({
         id: p.id,
         storageKey: p.storageKey,
@@ -263,8 +319,8 @@ export async function getDiscoverCards(req, res) {
         aboutMe: row.aboutMe ?? null,
         city: row.city ?? null,
         verified: Boolean(row.verified),
-        distanceMiles: Number(distanceMiles.toFixed(2)),
-        distanceLabel: `${Math.max(1, Math.round(distanceMiles))} mi`,
+        distanceMiles: distanceMiles != null ? Number(distanceMiles.toFixed(2)) : null,
+        distanceLabel: distanceMiles != null ? `${Math.max(1, Math.round(distanceMiles))} mi` : null,
         interests,
         photos,
         prompts,
@@ -274,7 +330,7 @@ export async function getDiscoverCards(req, res) {
 
     const lastRaw = sliced[sliced.length - 1]
     const nextCursor = hasMore && lastRaw
-      ? encodeCursor(Number(lastRaw.distanceMiles), lastRaw.id)
+      ? encodeCursor(lastRaw.distanceMiles != null ? Number(lastRaw.distanceMiles) : 0, lastRaw.id)
       : null
 
     return res.json({ cards, nextCursor, hasMore })
@@ -350,7 +406,7 @@ export async function swipeDiscoverCard(req, res) {
       return res.json({ ok: true, swipeType: type, matched: false })
     }
 
-    notifyNewLike(toUserId, type === 'super_like')
+    notifyNewLike(toUserId, fromUserId, type === 'super_like')
 
     const [reciprocal] = await db
       .select({ id: likes.id })
@@ -398,12 +454,131 @@ export async function swipeDiscoverCard(req, res) {
             or (${likes.fromUserId} = ${toUserId} and ${likes.toUserId} = ${fromUserId})`,
       )
 
-    notifyNewMatch(toUserId)
-    notifyNewMatch(fromUserId)
+    notifyNewMatch(toUserId, fromUserId)
+    notifyNewMatch(fromUserId, toUserId)
 
     return res.json({ ok: true, swipeType: type, matched: true, matchId: matchRow.id })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed to save swipe' })
+  }
+}
+
+export async function getUserProfile(req, res) {
+  try {
+    const viewerId = req.user.id
+    const targetId = req.params.userId
+    if (!targetId || targetId === viewerId) {
+      return res.status(400).json({ error: 'Invalid user' })
+    }
+
+    const [blocked] = await db
+      .select({ id: blocks.id })
+      .from(blocks)
+      .where(
+        sql`(${blocks.blockerId} = ${viewerId} and ${blocks.blockedId} = ${targetId})
+          or (${blocks.blockerId} = ${targetId} and ${blocks.blockedId} = ${viewerId})`,
+      )
+      .limit(1)
+    if (blocked) return res.status(403).json({ error: 'Profile not available' })
+
+    const [row] = await db
+      .select({
+        id: users.id,
+        handle: users.handle,
+        age: users.age,
+        pronouns: users.pronouns,
+        looking: users.looking,
+        relationshipGoal: users.relationshipGoal,
+        relStatus: users.relStatus,
+        bio: users.bio,
+        aboutMe: users.aboutMe,
+        city: users.city,
+        verified: users.idVerified,
+        latApprox: users.latApprox,
+        lngApprox: users.lngApprox,
+        isBanned: users.isBanned,
+        isPaused: users.isPaused,
+        deletedAt: users.deletedAt,
+      })
+      .from(users)
+      .where(eq(users.id, targetId))
+      .limit(1)
+
+    if (!row || row.isBanned || row.isPaused || row.deletedAt) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+
+    const [viewerRow, allPhotos, allPrompts, allInterests, allLifestyles] = await Promise.all([
+      db.select({ latApprox: users.latApprox, lngApprox: users.lngApprox })
+        .from(users).where(eq(users.id, viewerId)).limit(1),
+      db.select().from(userPhotos)
+        .where(and(eq(userPhotos.userId, targetId), isNull(userPhotos.deletedAt)))
+        .orderBy(desc(userPhotos.isMain), asc(userPhotos.position)),
+      db.select().from(userPrompts)
+        .where(eq(userPrompts.userId, targetId))
+        .orderBy(asc(userPrompts.position)),
+      db.select().from(userInterests)
+        .where(eq(userInterests.userId, targetId))
+        .orderBy(asc(userInterests.position)),
+      db.select().from(userLifestyle)
+        .where(eq(userLifestyle.userId, targetId)),
+    ])
+
+    const viewer = viewerRow[0]
+    const vLat = viewer?.latApprox
+    const vLng = viewer?.lngApprox
+    const rLat = row.latApprox
+    const rLng = row.lngApprox
+
+    let distanceMiles = null
+    let distanceLabel = null
+    const toNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null }
+    const vLatN = toNum(vLat), vLngN = toNum(vLng), rLatN = toNum(rLat), rLngN = toNum(rLng)
+    if (vLatN !== null && vLngN !== null && rLatN !== null && rLngN !== null) {
+      const toRad = (d) => d * Math.PI / 180
+      const dLat = toRad(rLatN - vLatN)
+      const dLng = toRad(rLngN - vLngN)
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(vLatN)) * Math.cos(toRad(rLatN)) * Math.sin(dLng / 2) ** 2
+      const miles = 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+      distanceMiles = Number(miles.toFixed(2))
+      distanceLabel = `${Math.max(1, Math.round(miles))} mi`
+    }
+
+    const lifestyle = allLifestyles[0]
+
+    return res.json({
+      id: row.id,
+      handle: row.handle,
+      age: row.age,
+      pronouns: row.pronouns ?? null,
+      looking: row.looking ?? null,
+      relStatus: row.relStatus ?? null,
+      relationshipGoal: row.relationshipGoal ?? null,
+      bio: row.bio ?? null,
+      aboutMe: row.aboutMe ?? null,
+      city: row.city ?? null,
+      verified: Boolean(row.verified),
+      distanceMiles,
+      distanceLabel,
+      interests: allInterests.slice(0, 6).map((i) => i.interest),
+      photos: allPhotos.slice(0, 6).map((p) => ({
+        id: p.id, storageKey: p.storageKey, position: p.position,
+        isMain: p.isMain, isBlurred: p.isBlurred, blurAmount: p.blurAmount,
+      })),
+      prompts: allPrompts.slice(0, 3).map((p) => ({
+        position: p.position, title: p.title, answer: p.answer,
+      })),
+      lifestyle: lifestyle ? {
+        height: lifestyle.height ?? null, drinks: lifestyle.drinks ?? null,
+        smokes: lifestyle.smokes ?? null, kids: lifestyle.kids ?? null,
+        pets: lifestyle.pets ?? null, diet: lifestyle.diet ?? null,
+        exercise: lifestyle.exercise ?? null, religion: lifestyle.religion ?? null,
+        education: lifestyle.education ?? null, zodiac: lifestyle.zodiac ?? null,
+      } : null,
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Failed to load profile' })
   }
 }

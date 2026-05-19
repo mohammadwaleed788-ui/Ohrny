@@ -4,7 +4,7 @@ import { likes, matches } from '../../../db/schema/matching.js'
 import { users, userPhotos } from '../../../db/schema/users.js'
 import { blocks } from '../../../db/schema/safety.js'
 import { subscriptionPlans, userSubscriptions } from '../../../db/schema/subscriptions.js'
-import { notifyNewMatch } from '../../services/notifications/likeNotification.js'
+import { notifyNewMatch, notifyPassed } from '../../services/notifications/likeNotification.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -303,10 +303,165 @@ export async function passLiker(req, res) {
       .set({ seenAt: new Date() })
       .where(eq(likes.id, inbound.id))
 
+    notifyPassed(fromUserId, userId)
+
     return res.json({ ok: true, removed: true })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed to pass liker' })
+  }
+}
+
+export async function getSentLikes(req, res) {
+  try {
+    const userId = req.user.id
+    const limit = clampInt(req.query.limit, 1, MAX_LIMIT, DEFAULT_LIMIT)
+    const cursor = decodeCursor(req.query.cursor)
+
+    const baseWhere = [
+      eq(likes.fromUserId, userId),
+      inArray(likes.type, ['like', 'super_like']),
+      eq(users.isBanned, false),
+      eq(users.isPaused, false),
+      sql`${users.deletedAt} is null`,
+      sql`not exists (
+        select 1 from ${blocks} b
+        where (b.blocker_id = ${userId} and b.blocked_id = ${likes.toUserId})
+           or (b.blocker_id = ${likes.toUserId} and b.blocked_id = ${userId})
+      )`,
+    ]
+
+    const whereParts = [...baseWhere]
+    if (cursor) {
+      whereParts.push(
+        sql`(${likes.createdAt} < ${cursor.createdAt} or (${likes.createdAt} = ${cursor.createdAt} and ${likes.id} < ${cursor.id}))`,
+      )
+    }
+
+    const [rows, countRow, viewerRow] = await Promise.all([
+      db
+        .select({
+          likeId: likes.id,
+          createdAt: likes.createdAt,
+          type: likes.type,
+          matchId: likes.matchId,
+          toUserId: likes.toUserId,
+          handle: users.handle,
+          age: users.age,
+          pronouns: users.pronouns,
+          verified: users.idVerified,
+          latApprox: users.latApprox,
+          lngApprox: users.lngApprox,
+          mainPhoto: sql`(
+            select ${userPhotos.storageKey}
+            from ${userPhotos}
+            where ${userPhotos.userId} = ${users.id}
+              and ${userPhotos.deletedAt} is null
+            order by ${userPhotos.isMain} desc, ${userPhotos.position} asc
+            limit 1
+          )`,
+          mainPhotoIsBlurred: sql`(
+            select ${userPhotos.isBlurred}
+            from ${userPhotos}
+            where ${userPhotos.userId} = ${users.id}
+              and ${userPhotos.deletedAt} is null
+            order by ${userPhotos.isMain} desc, ${userPhotos.position} asc
+            limit 1
+          )`,
+          mainPhotoBlurAmount: sql`(
+            select ${userPhotos.blurAmount}
+            from ${userPhotos}
+            where ${userPhotos.userId} = ${users.id}
+              and ${userPhotos.deletedAt} is null
+            order by ${userPhotos.isMain} desc, ${userPhotos.position} asc
+            limit 1
+          )`,
+        })
+        .from(likes)
+        .innerJoin(users, eq(users.id, likes.toUserId))
+        .where(and(...whereParts))
+        .orderBy(desc(likes.createdAt), desc(likes.id))
+        .limit(limit + 1),
+
+      db
+        .select({ count: sql`count(*)::int` })
+        .from(likes)
+        .innerJoin(users, eq(users.id, likes.toUserId))
+        .where(and(...baseWhere)),
+
+      db
+        .select({ latApprox: users.latApprox, lngApprox: users.lngApprox })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1),
+    ])
+
+    const hasMore = rows.length > limit
+    const sliced = hasMore ? rows.slice(0, limit) : rows
+    const viewer = viewerRow[0]
+
+    const items = sliced.map((row) => ({
+      toUserId: row.toUserId,
+      type: row.type,
+      superLike: row.type === 'super_like',
+      handle: row.handle,
+      age: row.age,
+      pronouns: row.pronouns ?? null,
+      verified: Boolean(row.verified),
+      distanceLabel: computeDistanceLabel(viewer?.latApprox, viewer?.lngApprox, row.latApprox, row.lngApprox),
+      mainPhoto: row.mainPhoto ?? null,
+      mainPhotoIsBlurred: Boolean(row.mainPhotoIsBlurred),
+      mainPhotoBlurAmount: Number(row.mainPhotoBlurAmount ?? 70),
+      sentAt: row.createdAt,
+      matched: row.matchId != null,
+    }))
+
+    const last = sliced[sliced.length - 1]
+    const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.likeId) : null
+
+    return res.json({
+      count: Number(countRow[0]?.count || 0),
+      items,
+      nextCursor,
+      hasMore,
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Failed to load sent likes' })
+  }
+}
+
+export async function unlikeUser(req, res) {
+  try {
+    const userId = req.user.id
+    const toUserId = req.params.toUserId
+    if (!toUserId || toUserId === userId) {
+      return res.status(400).json({ error: 'Invalid user' })
+    }
+
+    const [likeRow] = await db
+      .select({ id: likes.id, matchId: likes.matchId })
+      .from(likes)
+      .where(and(eq(likes.fromUserId, userId), eq(likes.toUserId, toUserId)))
+      .limit(1)
+
+    if (!likeRow) return res.status(404).json({ error: 'Like not found' })
+
+    if (likeRow.matchId) {
+      await db
+        .update(matches)
+        .set({ isActive: false, unmatchedAt: new Date(), unmatchedByUserId: userId, updatedAt: new Date() })
+        .where(eq(matches.id, likeRow.matchId))
+    }
+
+    await db
+      .delete(likes)
+      .where(and(eq(likes.fromUserId, userId), eq(likes.toUserId, toUserId)))
+
+    return res.json({ ok: true })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Failed to unlike' })
   }
 }
 
@@ -371,8 +526,8 @@ export async function likeBack(req, res) {
              or (${likes.fromUserId} = ${fromUserId} and ${likes.toUserId} = ${userId})`,
       )
 
-    notifyNewMatch(fromUserId)
-    notifyNewMatch(userId)
+    notifyNewMatch(fromUserId, userId)
+    notifyNewMatch(userId, fromUserId)
 
     return res.json({ ok: true, matched: true, matchId: matchRow.id })
   } catch (err) {
