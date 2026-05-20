@@ -142,6 +142,7 @@ function mapRelationshipGoal(value) {
     friends: 'friends',
     unsure: 'figuring_out',
     figuring_out: 'figuring_out',
+    open: 'open',
   }
   return map[value] || null
 }
@@ -169,6 +170,26 @@ function isValidHandle(value) {
   const handle = String(value || '').trim()
   if (handle.length < 2 || handle.length > 24) return false
   return /^[a-zA-Z0-9_-]+$/.test(handle)
+}
+
+export async function checkHandle(req, res) {
+  try {
+    const handle = String(req.query.handle || '').trim()
+    if (!isValidHandle(handle)) {
+      return res.status(400).json({ error: 'Handle must be 2–24 characters: letters, numbers, _ or - only' })
+    }
+    const [existing] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.handle, handle))
+      .limit(1)
+    if (existing) {
+      return res.status(409).json({ error: 'That name is already taken' })
+    }
+    return res.json({ available: true })
+  } catch {
+    return res.status(500).json({ error: 'Something went wrong' })
+  }
 }
 
 export async function verifyOtp(req, res) {

@@ -31,3 +31,11 @@ export const refreshLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many refresh requests' },
 })
+
+export const checkHandleLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many handle checks' },
+})
