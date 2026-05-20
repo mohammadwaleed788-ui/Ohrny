@@ -16,15 +16,22 @@ async function fetchUserCard(userId) {
     if (!row) return null
 
     const [photo] = await db
-      .select({ storageKey: userPhotos.storageKey, blurAmount: userPhotos.blurAmount })
+      .select({
+        storageKey: userPhotos.storageKey,
+        isBlurred: userPhotos.isBlurred,
+        blurAmount: userPhotos.blurAmount,
+      })
       .from(userPhotos)
       .where(and(eq(userPhotos.userId, userId), eq(userPhotos.isMain, true)))
       .limit(1)
 
+    // If the photo is not blurred, send 0 so the match screen shows it clearly.
+    const effectiveBlur = photo ? (photo.isBlurred ? photo.blurAmount : 0) : 70
+
     return {
       handle: row.handle,
       mainPhotoKey: photo?.storageKey ?? null,
-      blurAmount: photo?.blurAmount ?? 70,
+      blurAmount: effectiveBlur,
     }
   } catch {
     return null

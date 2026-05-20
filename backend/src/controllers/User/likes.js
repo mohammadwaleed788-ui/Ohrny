@@ -121,7 +121,8 @@ export async function getReceivedLikes(req, res) {
     const userId = req.user.id
     const limit = clampInt(req.query.limit, 1, MAX_LIMIT, DEFAULT_LIMIT)
     const cursor = decodeCursor(req.query.cursor)
-    const unlocked = await canSeeLikes(userId)
+    // Paywall bypassed until subscriptions go live — always show full data.
+    const unlocked = true // await canSeeLikes(userId)
 
     const whereParts = [
       eq(likes.toUserId, userId),
