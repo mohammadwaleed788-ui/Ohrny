@@ -2,6 +2,8 @@ import { Router } from 'express'
 import healthRoute from './health.route.js'
 import staffAuthRoutes from './Admin/auth.js'
 import adminOverviewRoutes from './Admin/overview.js'
+import adminMatchesRoutes from './Admin/matches.js'
+import adminUsersRoutes from './Admin/users.js'
 import memberAuthRoutes from './User/auth.js'
 import memberS3Routes from './User/s3.js'
 import memberDeviceRoutes from './User/device.js'
@@ -17,6 +19,8 @@ const router = Router()
 router.use(healthRoute)
 router.use('/admin', staffAuthRoutes)
 router.use('/admin', adminOverviewRoutes)
+router.use('/admin', adminMatchesRoutes)
+router.use('/admin', adminUsersRoutes)
 router.use('/user', memberAuthRoutes)
 router.use('/user', memberS3Routes)
 router.use('/user', memberDiscoverRoutes)
