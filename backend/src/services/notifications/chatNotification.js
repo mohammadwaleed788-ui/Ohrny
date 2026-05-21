@@ -20,7 +20,7 @@ export async function notifyNewMessage(recipientId, senderHandle, matchId) {
     .catch((err) => console.error('notifyNewMessage failed:', err.message))
 }
 
-export async function notifyPhotoUnlockRequest(recipientId, senderHandle) {
+export async function notifyPhotoUnlockRequest(recipientId, senderHandle, matchId) {
   const handle = senderHandle || 'Someone'
 
   const notification = {
@@ -31,6 +31,7 @@ export async function notifyPhotoUnlockRequest(recipientId, senderHandle) {
   const data = {
     type: 'photo_unlock_request',
     senderHandle: handle,
+    matchId: matchId ?? '',
   }
 
   getUserFcmTokens(recipientId)

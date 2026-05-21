@@ -1,6 +1,15 @@
 import { Router } from 'express'
 import { requireAuth } from '../../middleware/user/auth.js'
-import { getMatches, getMessages, sendMessage, markRead, requestUnlock, unmatch } from '../../controllers/User/chat.js'
+import {
+  getMatches,
+  getMessages,
+  sendMessage,
+  markRead,
+  requestUnlock,
+  unmatch,
+  deleteMessage,
+  getPartnerProfile,
+} from '../../controllers/User/chat.js'
 import { initiateCall, updateCallStatus, getCallHistory } from '../../controllers/User/call.js'
 
 const router = Router()
@@ -8,11 +17,13 @@ const router = Router()
 // Match endpoints
 router.get('/matches', requireAuth, getMatches)
 router.delete('/matches/:matchId', requireAuth, unmatch)
+router.get('/matches/:matchId/partner-profile', requireAuth, getPartnerProfile)
 
 // Message endpoints
 router.get('/matches/:matchId/messages', requireAuth, getMessages)
 router.post('/matches/:matchId/messages', requireAuth, sendMessage)
 router.patch('/matches/:matchId/read', requireAuth, markRead)
+router.delete('/matches/:matchId/messages/:messageId', requireAuth, deleteMessage)
 
 // Photo unlock
 router.post('/matches/:matchId/unlock', requireAuth, requestUnlock)
