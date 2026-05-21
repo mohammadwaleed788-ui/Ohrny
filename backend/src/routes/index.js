@@ -8,6 +8,7 @@ import memberPhotoRoutes from './User/photo.js'
 import memberDiscoverRoutes from './User/discover.js'
 import memberLikesRoutes from './User/likes.js'
 import memberChatRoutes from './User/chat.js'
+import memberSafetyRoutes from './User/safety.js'
 
 const router = Router()
 
@@ -18,6 +19,7 @@ router.use('/user', memberS3Routes)
 router.use('/user', memberDiscoverRoutes)
 router.use('/user', memberLikesRoutes)
 router.use('/user', memberChatRoutes)
+router.use('/user', memberSafetyRoutes)
 router.use('/user/devices', memberDeviceRoutes)
 router.use('/user/photos', memberPhotoRoutes)
 
