@@ -66,6 +66,22 @@ export async function sendPushNotification(tokens, notification, data = {}) {
       notification,
       data,
       tokens,
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+          },
+        },
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          sound: 'default',
+          channelId: 'high_importance_channel',
+          priority: 'max',
+        },
+      },
     }
 
     const response = await admin.messaging().sendEachForMulticast(message)
