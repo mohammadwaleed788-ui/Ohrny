@@ -78,7 +78,7 @@ export async function sendPushNotification(tokens, notification, data = {}) {
         priority: 'high',
         notification: {
           sound: 'default',
-          channelId: 'high_importance_channel',
+          channelId: 'ohrny_high_importance_v2',
           priority: 'max',
         },
       },
