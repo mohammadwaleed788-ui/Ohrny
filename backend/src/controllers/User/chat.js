@@ -9,6 +9,7 @@ import { notifyNewMessage, notifyPhotoUnlockRequest } from '../../services/notif
 
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 50
+const FREE_MESSAGE_LIMIT = 10
 
 function clampInt(value, min, max, fallback) {
   const n = Number(value)
@@ -32,6 +33,21 @@ function decodeCursor(raw) {
 
 function encodeCursor(createdAt, id) {
   return Buffer.from(`${new Date(createdAt).toISOString()}|${id}`, 'utf8').toString('base64url')
+}
+
+async function getVisibleSentMessageCount(matchId, userId) {
+  const [row] = await db
+    .select({ count: sql`count(*)::int` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.matchId, matchId),
+        eq(messages.senderId, userId),
+        isNull(messages.deletedAt),
+      ),
+    )
+
+  return Number(row?.count || 0)
 }
 
 // ── GET /user/matches ─────────────────────────────────────────
@@ -124,7 +140,7 @@ export async function getMatches(req, res) {
           photosUnlocked: row.photosUnlocked,
           unlockRequested: isUserA ? row.userAUnlockRequested : row.userBUnlockRequested,
           partnerUnlockRequested: isUserA ? row.userBUnlockRequested : row.userAUnlockRequested,
-          myMessageCount: isUserA ? row.messageCountUserA : row.messageCountUserB,
+          myMessageCount: await getVisibleSentMessageCount(row.matchId, userId),
           partner: {
             id: partnerId,
             handle: partner?.handle ?? null,
@@ -251,10 +267,10 @@ export async function sendMessage(req, res) {
       .limit(1)
 
     const isFree = !sender || sender.plan === 'free'
+    const myMsgCount = await getVisibleSentMessageCount(matchId, userId)
 
     if (isFree) {
-      const myMsgCount = isUserA ? match.messageCountUserA : match.messageCountUserB
-      if (myMsgCount >= 10) {
+      if (myMsgCount >= FREE_MESSAGE_LIMIT) {
         return res.status(403).json({ error: 'message_limit', paywall: 'messages' })
       }
 
@@ -282,8 +298,8 @@ export async function sendMessage(req, res) {
       .returning()
 
     const countField = isUserA
-      ? { messageCountUserA: match.messageCountUserA + 1 }
-      : { messageCountUserB: match.messageCountUserB + 1 }
+      ? { messageCountUserA: myMsgCount + 1 }
+      : { messageCountUserB: myMsgCount + 1 }
 
     await db
       .update(matches)
@@ -516,9 +532,7 @@ export async function deleteMessage(req, res) {
       .set({ deletedAt: new Date() })
       .where(eq(messages.id, messageId))
 
-    // Decrement sender's message count (never below 0) to restore free-tier credit
-    const currentCount = isUserA ? match.messageCountUserA : match.messageCountUserB
-    const newCount = Math.max(0, currentCount - 1)
+    const newCount = await getVisibleSentMessageCount(matchId, userId)
     const countField = isUserA
       ? { messageCountUserA: newCount }
       : { messageCountUserB: newCount }

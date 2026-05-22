@@ -1,5 +1,5 @@
 import { Server } from 'socket.io'
-import { and, eq, or } from 'drizzle-orm'
+import { and, eq, isNull, or, sql } from 'drizzle-orm'
 import { socketAuthMiddleware } from './auth.js'
 import { db } from '../../db/index.js'
 import { matches } from '../../db/schema/matching.js'
@@ -8,6 +8,7 @@ import { users } from '../../db/schema/users.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../services/notifications/chatNotification.js'
 
 let io = null
+const FREE_MESSAGE_LIMIT = 10
 
 export function getIO() {
   return io
@@ -76,10 +77,10 @@ export function initSocket(server) {
           .limit(1)
 
         const isFree = !sender || sender.plan === 'free'
+        const myMsgCount = await getVisibleSentMessageCount(matchId, userId)
 
         if (isFree) {
-          const myMsgCount = isUserA ? match.messageCountUserA : match.messageCountUserB
-          if (myMsgCount >= 10) {
+          if (myMsgCount >= FREE_MESSAGE_LIMIT) {
             return ack?.({ error: 'message_limit', paywall: 'messages' })
           }
 
@@ -106,7 +107,7 @@ export function initSocket(server) {
           })
           .returning()
 
-        const countField = isUserA ? { messageCountUserA: match.messageCountUserA + 1 } : { messageCountUserB: match.messageCountUserB + 1 }
+        const countField = isUserA ? { messageCountUserA: myMsgCount + 1 } : { messageCountUserB: myMsgCount + 1 }
         await db
           .update(matches)
           .set({ ...countField, updatedAt: now })
@@ -257,4 +258,19 @@ async function getStartedChatCount(userId) {
     .where(eq(messages.senderId, userId))
 
   return { startedCount: rows.length }
+}
+
+async function getVisibleSentMessageCount(matchId, userId) {
+  const [row] = await db
+    .select({ count: sql`count(*)::int` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.matchId, matchId),
+        eq(messages.senderId, userId),
+        isNull(messages.deletedAt),
+      ),
+    )
+
+  return Number(row?.count || 0)
 }
