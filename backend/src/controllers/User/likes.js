@@ -169,6 +169,14 @@ export async function getReceivedLikes(req, res) {
           order by ${userPhotos.isMain} desc, ${userPhotos.position} asc
           limit 1
         )`,
+        mainPhotoIsBlurred: sql`(
+          select ${userPhotos.isBlurred}
+          from ${userPhotos}
+          where ${userPhotos.userId} = ${users.id}
+            and ${userPhotos.deletedAt} is null
+          order by ${userPhotos.isMain} desc, ${userPhotos.position} asc
+          limit 1
+        )`,
       })
       .from(likes)
       .innerJoin(users, eq(users.id, likes.fromUserId))
@@ -246,7 +254,10 @@ export async function getReceivedLikes(req, res) {
         verified: Boolean(row.verified),
         distanceLabel,
         mainPhoto: row.mainPhoto,
-        blurred: false,
+        // Respect the photo's own blur setting. A like never implies photo
+        // unlock — that's a per-match property — so a re-like after unmatch
+        // must not carry over the previous match's unlocked state.
+        blurred: Boolean(row.mainPhotoIsBlurred ?? true),
         note: isSuperLike ? 'Sent you a Super Like' : null,
       }
     })
