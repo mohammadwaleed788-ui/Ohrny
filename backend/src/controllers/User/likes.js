@@ -5,6 +5,7 @@ import { users, userPhotos } from '../../../db/schema/users.js'
 import { blocks } from '../../../db/schema/safety.js'
 import { subscriptionPlans, userSubscriptions } from '../../../db/schema/subscriptions.js'
 import { notifyNewMatch, notifyPassed } from '../../services/notifications/likeNotification.js'
+import { attachUsersToMatchRoom } from '../../socket/index.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -544,6 +545,11 @@ export async function likeBack(req, res) {
 
     notifyNewMatch(fromUserId, userId)
     notifyNewMatch(userId, fromUserId)
+    try {
+      await attachUsersToMatchRoom([userId, fromUserId], matchRow.id)
+    } catch (err) {
+      console.error('attachUsersToMatchRoom failed:', err.message)
+    }
 
     return res.json({ ok: true, matched: true, matchId: matchRow.id })
   } catch (err) {

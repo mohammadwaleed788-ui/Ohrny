@@ -5,6 +5,7 @@ import { userDiscoverPreferences } from '../../../db/schema/settings.js'
 import { likes, matches } from '../../../db/schema/matching.js'
 import { blocks } from '../../../db/schema/safety.js'
 import { notifyNewLike, notifyNewMatch } from '../../services/notifications/likeNotification.js'
+import { attachUsersToMatchRoom } from '../../socket/index.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -458,6 +459,11 @@ export async function swipeDiscoverCard(req, res) {
 
     notifyNewMatch(toUserId, fromUserId)
     notifyNewMatch(fromUserId, toUserId)
+    try {
+      await attachUsersToMatchRoom([fromUserId, toUserId], matchRow.id)
+    } catch (err) {
+      console.error('attachUsersToMatchRoom failed:', err.message)
+    }
 
     return res.json({ ok: true, swipeType: type, matched: true, matchId: matchRow.id })
   } catch (err) {

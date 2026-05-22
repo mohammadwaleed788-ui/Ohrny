@@ -4,7 +4,7 @@ import { likes, matches } from '../../../db/schema/matching.js'
 import { messages } from '../../../db/schema/messaging.js'
 import { users, userPhotos, userPrompts, userInterests, userLifestyle } from '../../../db/schema/users.js'
 import { blocks } from '../../../db/schema/safety.js'
-import { getIO } from '../../socket/index.js'
+import { attachUsersToMatchRoom, getIO, isUserReadingMatch } from '../../socket/index.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../../services/notifications/chatNotification.js'
 
 const DEFAULT_LIMIT = 30
@@ -320,10 +320,10 @@ export async function sendMessage(req, res) {
     // Broadcast via Socket.IO
     const io = getIO()
     if (io) {
+      await attachUsersToMatchRoom([userId, recipientId], matchId, { emitMatchNew: false })
       io.to(`match:${matchId}`).emit('message:new', outMsg)
 
-      const recipientSockets = await io.in(`user:${recipientId}`).fetchSockets()
-      if (recipientSockets.length === 0) {
+      if (!(await isUserReadingMatch(recipientId, matchId))) {
         notifyNewMessage(recipientId, req.user.handle, matchId)
       }
     } else {

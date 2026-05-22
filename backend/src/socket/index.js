@@ -14,6 +14,46 @@ export function getIO() {
   return io
 }
 
+export async function attachUsersToMatchRoom(userIds, matchId, options = {}) {
+  if (!io || !matchId || !Array.isArray(userIds)) return
+  const emitMatchNew = options.emitMatchNew ?? true
+
+  for (const userId of userIds) {
+    const sockets = await io.in(`user:${userId}`).fetchSockets()
+    for (const socket of sockets) {
+      socket.join(`match:${matchId}`)
+    }
+    if (emitMatchNew) {
+      io.to(`user:${userId}`).emit('match:new', { matchId })
+    }
+  }
+}
+
+export async function isUserReadingMatch(userId, matchId) {
+  if (!io || !userId || !matchId) return false
+
+  const sockets = await io.in(`user:${userId}`).fetchSockets()
+  return sockets.some((socket) => socket.data?.activeMatchId === matchId)
+}
+
+async function joinSocketToMatchIfMember(socket, matchId) {
+  if (!matchId) return false
+
+  const [match] = await db
+    .select({ userAId: matches.userAId, userBId: matches.userBId })
+    .from(matches)
+    .where(and(eq(matches.id, matchId), eq(matches.isActive, true)))
+    .limit(1)
+
+  if (!match) return false
+  if (match.userAId !== socket.userId && match.userBId !== socket.userId) {
+    return false
+  }
+
+  socket.join(`match:${matchId}`)
+  return true
+}
+
 export function initSocket(server) {
   io = new Server(server, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -46,6 +86,26 @@ export function initSocket(server) {
     } catch (err) {
       console.error('Socket room join error:', err.message)
     }
+
+    socket.on('chat:open', async (data, ack) => {
+      try {
+        const { matchId } = data || {}
+        const ok = await joinSocketToMatchIfMember(socket, matchId)
+        if (ok) socket.data.activeMatchId = matchId
+        ack?.({ ok })
+      } catch (err) {
+        console.error('chat:open error:', err.message)
+        ack?.({ ok: false })
+      }
+    })
+
+    socket.on('chat:close', (data, ack) => {
+      const { matchId } = data || {}
+      if (!matchId || socket.data.activeMatchId === matchId) {
+        socket.data.activeMatchId = null
+      }
+      ack?.({ ok: true })
+    })
 
     // ── message:send ──────────────────────────────────────────
     socket.on('message:send', async (data, ack) => {
@@ -123,12 +183,12 @@ export function initSocket(server) {
           createdAt: msg.createdAt,
         }
 
+        await attachUsersToMatchRoom([userId, recipientId], matchId, { emitMatchNew: false })
         io.to(`match:${matchId}`).emit('message:new', outMsg)
         ack?.({ ok: true, message: outMsg })
 
-        // Push notification if recipient is not connected
-        const recipientSockets = await io.in(`user:${recipientId}`).fetchSockets()
-        if (recipientSockets.length === 0) {
+        // Push unless the recipient is actively reading this exact chat.
+        if (!(await isUserReadingMatch(recipientId, matchId))) {
           notifyNewMessage(recipientId, socket.userHandle, matchId)
         }
       } catch (err) {
