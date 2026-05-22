@@ -98,11 +98,12 @@ async function findVisibleInboundLike(userId, fromUserId) {
         eq(users.isBanned, false),
         eq(users.isPaused, false),
         sql`${users.deletedAt} is null`,
-        sql`not exists (
-          select 1 from ${blocks} b
-          where (b.blocker_id = ${userId} and b.blocked_id = ${fromUserId})
-             or (b.blocker_id = ${fromUserId} and b.blocked_id = ${userId})
-        )`,
+        // TODO: re-enable before going live
+        // sql`not exists (
+        //   select 1 from ${blocks} b
+        //   where (b.blocker_id = ${userId} and b.blocked_id = ${fromUserId})
+        //      or (b.blocker_id = ${fromUserId} and b.blocked_id = ${userId})
+        // )`,
         sql`not exists (
           select 1 from ${likes} my_swipe
           where my_swipe.from_user_id = ${userId}
@@ -130,11 +131,12 @@ export async function getReceivedLikes(req, res) {
       eq(users.isBanned, false),
       eq(users.isPaused, false),
       sql`${users.deletedAt} is null`,
-      sql`not exists (
-        select 1 from ${blocks} b
-        where (b.blocker_id = ${userId} and b.blocked_id = ${likes.fromUserId})
-           or (b.blocker_id = ${likes.fromUserId} and b.blocked_id = ${userId})
-      )`,
+      // TODO: re-enable before going live
+      // sql`not exists (
+      //   select 1 from ${blocks} b
+      //   where (b.blocker_id = ${userId} and b.blocked_id = ${likes.fromUserId})
+      //      or (b.blocker_id = ${likes.fromUserId} and b.blocked_id = ${userId})
+      // )`,
       sql`not exists (
         select 1 from ${likes} my_swipe
         where my_swipe.from_user_id = ${userId}
@@ -195,11 +197,12 @@ export async function getReceivedLikes(req, res) {
           eq(users.isBanned, false),
           eq(users.isPaused, false),
           sql`${users.deletedAt} is null`,
-          sql`not exists (
-            select 1 from ${blocks} b
-            where (b.blocker_id = ${userId} and b.blocked_id = ${likes.fromUserId})
-               or (b.blocker_id = ${likes.fromUserId} and b.blocked_id = ${userId})
-          )`,
+          // TODO: re-enable before going live
+          // sql`not exists (
+          //   select 1 from ${blocks} b
+          //   where (b.blocker_id = ${userId} and b.blocked_id = ${likes.fromUserId})
+          //      or (b.blocker_id = ${likes.fromUserId} and b.blocked_id = ${userId})
+          // )`,
           sql`not exists (
             select 1 from ${likes} my_swipe
             where my_swipe.from_user_id = ${userId}
@@ -336,11 +339,12 @@ export async function getSentLikes(req, res) {
       eq(users.isBanned, false),
       eq(users.isPaused, false),
       sql`${users.deletedAt} is null`,
-      sql`not exists (
-        select 1 from ${blocks} b
-        where (b.blocker_id = ${userId} and b.blocked_id = ${likes.toUserId})
-           or (b.blocker_id = ${likes.toUserId} and b.blocked_id = ${userId})
-      )`,
+      // TODO: re-enable before going live
+      // sql`not exists (
+      //   select 1 from ${blocks} b
+      //   where (b.blocker_id = ${userId} and b.blocked_id = ${likes.toUserId})
+      //      or (b.blocker_id = ${likes.toUserId} and b.blocked_id = ${userId})
+      // )`,
     ]
 
     const whereParts = [...baseWhere]

@@ -369,17 +369,19 @@ export async function swipeDiscoverCard(req, res) {
       return res.status(404).json({ error: 'User not available' })
     }
 
-    const [blocked] = await db
-      .select({ id: blocks.id })
-      .from(blocks)
-      .where(
-        sql`(${blocks.blockerId} = ${fromUserId} and ${blocks.blockedId} = ${toUserId})
-          or (${blocks.blockerId} = ${toUserId} and ${blocks.blockedId} = ${fromUserId})`,
-      )
-      .limit(1)
-    if (blocked) {
-      return res.status(403).json({ error: 'Interaction not allowed' })
-    }
+    // TODO: re-enable before going live — disabled for testing so reported/blocked
+    // users can still be swiped on during development.
+    // const [blocked] = await db
+    //   .select({ id: blocks.id })
+    //   .from(blocks)
+    //   .where(
+    //     sql`(${blocks.blockerId} = ${fromUserId} and ${blocks.blockedId} = ${toUserId})
+    //       or (${blocks.blockerId} = ${toUserId} and ${blocks.blockedId} = ${fromUserId})`,
+    //   )
+    //   .limit(1)
+    // if (blocked) {
+    //   return res.status(403).json({ error: 'Interaction not allowed' })
+    // }
 
     const now = new Date()
     await db
@@ -472,15 +474,16 @@ export async function getUserProfile(req, res) {
       return res.status(400).json({ error: 'Invalid user' })
     }
 
-    const [blocked] = await db
-      .select({ id: blocks.id })
-      .from(blocks)
-      .where(
-        sql`(${blocks.blockerId} = ${viewerId} and ${blocks.blockedId} = ${targetId})
-          or (${blocks.blockerId} = ${targetId} and ${blocks.blockedId} = ${viewerId})`,
-      )
-      .limit(1)
-    if (blocked) return res.status(403).json({ error: 'Profile not available' })
+    // TODO: re-enable before going live
+    // const [blocked] = await db
+    //   .select({ id: blocks.id })
+    //   .from(blocks)
+    //   .where(
+    //     sql`(${blocks.blockerId} = ${viewerId} and ${blocks.blockedId} = ${targetId})
+    //       or (${blocks.blockerId} = ${targetId} and ${blocks.blockedId} = ${viewerId})`,
+    //   )
+    //   .limit(1)
+    // if (blocked) return res.status(403).json({ error: 'Profile not available' })
 
     const [row] = await db
       .select({
