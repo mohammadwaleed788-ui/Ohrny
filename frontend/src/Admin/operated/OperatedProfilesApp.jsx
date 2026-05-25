@@ -1,0 +1,187 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Shield, X } from 'lucide-react'
+import { useAuth } from '../../contexts/AuthContext'
+import { Button, Chip, StatusDot } from './operatedStyles.jsx'
+import { op } from './operatedTheme'
+import { adminGet, adminPatch, adminPost } from './operatedApi'
+import { PersonaRail } from './PersonaRail'
+import { InboxView } from './InboxView'
+import { ProfileView } from './ProfileView'
+import { FeedView } from './FeedView'
+import { DashboardView } from './DashboardView'
+import { NewPersonaModal } from './NewPersonaModal'
+
+const tabs = [
+  { id: 'inbox', label: 'Inbox' },
+  { id: 'profile', label: 'Profile' },
+  { id: 'feed', label: 'Feed' },
+  { id: 'dashboard', label: 'Dashboard' },
+]
+
+export default function OperatedProfilesApp() {
+  const { admin } = useAuth()
+  const [personas, setPersonas] = useState([])
+  const [selectedId, setSelectedId] = useState('')
+  const [operatedToken, setOperatedToken] = useState('')
+  const [tab, setTab] = useState('inbox')
+  const [search, setSearch] = useState('')
+  const [newOpen, setNewOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const persona = personas.find((item) => item.id === selectedId) ?? personas[0] ?? null
+  const unreadByPersona = useMemo(() => {
+    return Object.fromEntries(personas.map((item) => [item.id, item.unread ?? 0]))
+  }, [personas])
+  const threadsCount = persona?.stats?.active ?? 0
+
+  useEffect(() => {
+    let cancelled = false
+    adminGet('/admin/operated/personas')
+      .then(({ personas: nextPersonas }) => {
+        if (cancelled) return
+        setPersonas(nextPersonas)
+        setSelectedId((current) => current || nextPersonas[0]?.id || '')
+        setError('')
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || 'Failed to load operated personas')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!persona?.id) {
+      return undefined
+    }
+
+    adminPost(`/admin/operated/personas/${persona.id}/session`)
+      .then(({ accessToken }) => {
+        if (!cancelled) setOperatedToken(accessToken)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setOperatedToken('')
+          setError(err.message || 'Failed to create operated session')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [persona?.id])
+
+  const updatePersona = async (nextPersona) => {
+    const payload = {
+      age: nextPersona.age,
+      gender: nextPersona.gender,
+      orientation: nextPersona.orientation,
+      city: nextPersona.city,
+      bio: nextPersona.bio,
+      work: nextPersona.work,
+      relStatus: nextPersona.relStatus,
+      intent: nextPersona.intent,
+      height: nextPersona.height,
+      drinks: nextPersona.drinks,
+      smokes: nextPersona.smokes,
+      kids: nextPersona.kids,
+      edu: nextPersona.edu,
+      interests: nextPersona.interests,
+      photos: nextPersona.photosList,
+    }
+    const { persona: saved } = await adminPatch(`/admin/operated/personas/${nextPersona.id}`, payload)
+    setPersonas((value) => value.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)))
+  }
+
+  const createPersona = async (draft) => {
+    const { persona: next } = await adminPost('/admin/operated/personas', {
+      name: draft.name,
+      age: draft.age,
+      gender: draft.gender,
+      city: draft.city,
+      bio: draft.bio || 'New persona bio.',
+    })
+    setPersonas((value) => [...value, next])
+    setSelectedId(next.id)
+    setTab('profile')
+    setNewOpen(false)
+  }
+
+  return (
+    <div className={`grid h-screen grid-rows-[57px_1fr] overflow-hidden ${op.bgMain} ${op.text}`}>
+      <header className="flex items-center gap-4 border-b border-[oklch(0.26_0.01_260)] bg-[linear-gradient(90deg,oklch(0.70_0.17_25_/_0.18),oklch(0.17_0.008_260))] px-4">
+        <div className="flex items-center gap-2.5">
+          <div className="h-7 w-7 rounded-lg bg-[radial-gradient(circle_at_30%_30%,oklch(0.80_0.17_25),oklch(0.55_0.17_25))]" />
+          <div>
+            <div className="text-sm font-bold"><span>Ohrny</span> <span className={op.mute}>- operated profiles</span></div>
+            <div className={`font-mono text-[11px] ${op.mute}`}>workspace - separate from admin console</div>
+          </div>
+        </div>
+        <div className={`inline-flex items-center gap-2 rounded-md ${op.warnBg} px-3 py-1 text-xs font-semibold ${op.warn}`}>
+          <Shield className="h-3.5 w-3.5" /> live engagement with real users - every action is attributable and audited
+        </div>
+        <div className="flex-1" />
+        <Chip>{admin?.name ?? 'Elena M.'} - founder</Chip>
+        <Button onClick={() => window.close()}><X className="h-4 w-4" /> Close</Button>
+      </header>
+
+      <main className="grid min-h-0 grid-cols-[280px_1fr]">
+        <PersonaRail
+          personas={personas}
+          selectedId={persona?.id}
+          unreadByPersona={unreadByPersona}
+          search={search}
+          onSearchChange={setSearch}
+          onSelect={setSelectedId}
+          onNew={() => setNewOpen(true)}
+        />
+
+        <section className="grid min-h-0 grid-rows-[54px_1fr]">
+          <div className={`flex items-center gap-2 border-b ${op.borderSoft} px-5`}>
+            {tabs.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`flex h-full items-center gap-2 border-b-2 px-3 text-sm font-medium ${
+                  tab === item.id ? `border-[oklch(0.72_0.15_25)] ${op.text}` : `border-transparent ${op.dim} hover:${op.text}`
+                }`}
+                onClick={() => setTab(item.id)}
+              >
+                {item.label}
+                {item.id === 'inbox' && <span className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] ${tab === item.id ? `${op.accentBg} ${op.accent}` : `${op.bgElev2} ${op.mute}`}`}>{threadsCount}</span>}
+              </button>
+            ))}
+            <div className="flex-1" />
+            {persona && <Chip tone={persona.status === 'active' ? 'ok' : 'warn'}><StatusDot status={persona.status} /> {persona.status}</Chip>}
+            {persona && <Button onClick={async () => {
+              const status = persona.status === 'active' ? 'paused' : 'active'
+              const { persona: saved } = await adminPatch(`/admin/operated/personas/${persona.id}/status`, { status })
+              setPersonas((value) => value.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)))
+            }}>
+              {persona.status === 'active' ? 'Pause persona' : 'Activate persona'}
+            </Button>
+            }
+          </div>
+
+          <div className="min-h-0">
+            {loading && <div className={`grid h-full place-items-center ${op.mute}`}>Loading operated personas...</div>}
+            {!loading && error && <div className={`grid h-full place-items-center ${op.bad}`}>{error}</div>}
+            {!loading && !error && !persona && <div className={`grid h-full place-items-center ${op.mute}`}>Create an operated persona to begin.</div>}
+            {!loading && !error && persona && tab === 'inbox' && <InboxView persona={persona} userToken={operatedToken} />}
+            {!loading && !error && persona && tab === 'profile' && <ProfileView persona={persona} onChange={updatePersona} />}
+            {!loading && !error && persona && tab === 'feed' && <FeedView persona={persona} userToken={operatedToken} />}
+            {!loading && !error && persona && tab === 'dashboard' && <DashboardView persona={persona} />}
+          </div>
+        </section>
+      </main>
+
+      {newOpen && <NewPersonaModal onClose={() => setNewOpen(false)} onCreate={createPersona} />}
+    </div>
+  )
+}

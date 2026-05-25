@@ -4,6 +4,7 @@ import staffAuthRoutes from './Admin/auth.js'
 import adminOverviewRoutes from './Admin/overview.js'
 import adminMatchesRoutes from './Admin/matches.js'
 import adminUsersRoutes from './Admin/users.js'
+import adminOperatedRoutes from './Admin/operated.js'
 import memberAuthRoutes from './User/auth.js'
 import memberS3Routes from './User/s3.js'
 import memberDeviceRoutes from './User/device.js'
@@ -21,6 +22,7 @@ router.use('/admin', staffAuthRoutes)
 router.use('/admin', adminOverviewRoutes)
 router.use('/admin', adminMatchesRoutes)
 router.use('/admin', adminUsersRoutes)
+router.use('/admin/operated', adminOperatedRoutes)
 router.use('/user', memberAuthRoutes)
 router.use('/user', memberS3Routes)
 router.use('/user', memberDiscoverRoutes)

@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import {
+  ADMIN_ACCESS_STORAGE_KEY,
+  ADMIN_REFRESH_STORAGE_KEY,
   apiGet,
   apiPost,
   clearAdminTokens,
@@ -67,6 +69,31 @@ export function AuthProvider({ children }) {
       cancelled = true
     }
   }, [applySession, clearSession])
+
+  useEffect(() => {
+    const syncLogoutAcrossWindows = (event) => {
+      if (
+        event.key === ADMIN_ACCESS_STORAGE_KEY ||
+        event.key === ADMIN_REFRESH_STORAGE_KEY
+      ) {
+        if (!event.newValue) clearSession()
+      }
+    }
+
+    const verifyStoredSession = () => {
+      if (admin && !getStoredRefreshToken()) clearSession()
+    }
+
+    window.addEventListener('storage', syncLogoutAcrossWindows)
+    window.addEventListener('focus', verifyStoredSession)
+    document.addEventListener('visibilitychange', verifyStoredSession)
+
+    return () => {
+      window.removeEventListener('storage', syncLogoutAcrossWindows)
+      window.removeEventListener('focus', verifyStoredSession)
+      document.removeEventListener('visibilitychange', verifyStoredSession)
+    }
+  }, [admin, clearSession])
 
   const login = useCallback(
     async (email, password) => {

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import AdminApp from './Admin/AdminApp.jsx'
+import OperatedProfilesApp from './Admin/operated/OperatedProfilesApp.jsx'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { ProtectedRoute } from './components/ProtectedRoute.jsx'
 import { LoginPage } from './pages/LoginPage.jsx'
@@ -14,6 +15,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <AdminApp />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/operated-profiles"
+          element={
+            <ProtectedRoute>
+              <OperatedProfilesApp />
             </ProtectedRoute>
           }
         />
