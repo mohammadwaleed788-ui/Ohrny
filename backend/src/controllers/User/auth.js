@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt'
-import { eq, and, desc, gte, lt } from 'drizzle-orm'
+import { eq, and, or, desc, gte, lt, isNull, inArray } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import {
   users,
@@ -11,6 +11,8 @@ import {
 import { phoneVerifications } from '../../../db/schema/safety.js'
 import { userPrivacySettings, userDiscoverPreferences } from '../../../db/schema/settings.js'
 import { userDevices } from '../../../db/schema/userDevices.js'
+import { likes, matches } from '../../../db/schema/matching.js'
+import { messages } from '../../../db/schema/messaging.js'
 import {
   signAccessTokenUser,
   signRefreshTokenUser,
@@ -20,6 +22,7 @@ import {
 } from '../../utils/jwt.js'
 import { normalizePhoneE164 } from '../../utils/phone.js'
 import { resolveOtpProvider, sendOtpWithProvider, verifyOtpWithProvider } from '../../services/otp/provider.js'
+import { getIO } from '../../socket/index.js'
 
 async function loadUserDetails(userId) {
   const [account] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
@@ -286,9 +289,14 @@ export async function verifyOtp(req, res) {
         return res.status(403).json({ error: 'Account not available' })
       }
 
+      // Instagram-style: logging back in automatically resumes a paused account.
+      const reactivate = existing.isPaused
+        ? { isPaused: false, pausedUntil: null }
+        : {}
+
       await db
         .update(users)
-        .set({ phoneVerified: true, updatedAt: new Date() })
+        .set({ phoneVerified: true, ...reactivate, updatedAt: new Date() })
         .where(eq(users.id, existing.id))
 
       const tokens = await issueTokens(existing.id)
@@ -832,6 +840,7 @@ export async function deleteAccount(req, res) {
 export async function wipeAccount(req, res) {
   try {
     const userId = req.user.id
+    let removedMatches = [] // [{ id, partnerId }] — for socket broadcast after commit
 
     await db.transaction(async (tx) => {
       // Clear optional profile fields, keep account credentials intact
@@ -869,7 +878,56 @@ export async function wipeAccount(req, res) {
           updatedAt: new Date(),
         })
         .where(eq(userLifestyle.userId, userId))
+
+      // ── Wipe interactions: likes, matches, messages ──────────────────────
+      // Hard-delete every like row the user is involved in (either side).
+      await tx
+        .delete(likes)
+        .where(or(eq(likes.fromUserId, userId), eq(likes.toUserId, userId)))
+
+      // Find every active match this user is part of, soft-deactivate them
+      // and soft-delete their messages.
+      const userMatches = await tx
+        .select({ id: matches.id, partnerA: matches.userAId, partnerB: matches.userBId })
+        .from(matches)
+        .where(
+          and(
+            or(eq(matches.userAId, userId), eq(matches.userBId, userId)),
+            eq(matches.isActive, true),
+          ),
+        )
+
+      if (userMatches.length > 0) {
+        const matchIds = userMatches.map((m) => m.id)
+        await tx
+          .update(messages)
+          .set({ deletedAt: new Date() })
+          .where(and(inArray(messages.matchId, matchIds), isNull(messages.deletedAt)))
+
+        await tx
+          .update(matches)
+          .set({
+            isActive: false,
+            unmatchedAt: new Date(),
+            unmatchedByUserId: userId,
+            updatedAt: new Date(),
+          })
+          .where(inArray(matches.id, matchIds))
+
+        removedMatches = userMatches.map((m) => ({
+          id: m.id,
+          partnerId: m.partnerA === userId ? m.partnerB : m.partnerA,
+        }))
+      }
     })
+
+    // After commit: tell each partner their match has vanished, like unmatch does.
+    const io = getIO()
+    if (io) {
+      for (const r of removedMatches) {
+        io.to(`user:${r.partnerId}`).emit('match:removed', { matchId: r.id })
+      }
+    }
 
     const updated = await loadUserDetails(userId)
     return res.json({ user: updated })
@@ -879,9 +937,19 @@ export async function wipeAccount(req, res) {
   }
 }
 
+// Accepts body.duration ∈ {1d, 3d, 1w, 2w, indefinite}.
+// When omitted, toggles current state (legacy behaviour).
+const PAUSE_DURATION_MS = {
+  '1d': 1 * 24 * 60 * 60 * 1000,
+  '3d': 3 * 24 * 60 * 60 * 1000,
+  '1w': 7 * 24 * 60 * 60 * 1000,
+  '2w': 14 * 24 * 60 * 60 * 1000,
+}
+
 export async function pauseAccount(req, res) {
   try {
     const userId = req.user.id
+    const duration = req.body?.duration
 
     const [account] = await db
       .select({ isPaused: users.isPaused })
@@ -891,8 +959,23 @@ export async function pauseAccount(req, res) {
 
     if (!account) return res.status(404).json({ error: 'Account not found' })
 
-    const nowPaused = !account.isPaused
-    const pausedUntil = nowPaused ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null
+    // If client supplies a duration explicitly, honor it (pause).
+    // Otherwise toggle the current state.
+    let nowPaused
+    let pausedUntil
+    if (duration !== undefined) {
+      if (duration !== 'indefinite' && !(duration in PAUSE_DURATION_MS)) {
+        return res.status(400).json({ error: 'Invalid duration' })
+      }
+      nowPaused = true
+      pausedUntil =
+        duration === 'indefinite'
+          ? null
+          : new Date(Date.now() + PAUSE_DURATION_MS[duration])
+    } else {
+      nowPaused = !account.isPaused
+      pausedUntil = nowPaused ? new Date(Date.now() + PAUSE_DURATION_MS['1w']) : null
+    }
 
     await db
       .update(users)

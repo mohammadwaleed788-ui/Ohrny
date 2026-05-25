@@ -26,10 +26,16 @@ export const messages = pgTable('messages', {
 
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt:    timestamp('deleted_at', { withTimezone: true }),
+  // ── Per-user hiding ───────────────────────────────────────────────────────
+  // When set, the message is hidden ONLY for this user (the one who chose
+  // "Delete for me"). The other participant still sees it. For
+  // "Delete for everyone" we use deletedAt instead.
+  deletedForUserId: uuid('deleted_for_user_id').references(() => users.id, { onDelete: 'cascade' }),
 }, (t) => ({
   matchIdx:     index('messages_match_idx').on(t.matchId),
   senderIdx:    index('messages_sender_idx').on(t.senderId),
   expiresIdx:   index('messages_expires_idx').on(t.expiresAt),
+  deletedForIdx: index('messages_deleted_for_idx').on(t.deletedForUserId),
 }));
 
 // ─── calls ────────────────────────────────────────────────────────────────────

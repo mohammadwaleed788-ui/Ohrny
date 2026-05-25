@@ -90,6 +90,7 @@ export async function getMatches(req, res) {
             handle: users.handle,
             age: users.age,
             verified: users.idVerified,
+            isPaused: users.isPaused,
             screenshotShield: userPrivacySettings.screenshotShield,
           })
           .from(users)
@@ -113,7 +114,7 @@ export async function getMatches(req, res) {
           )
           .limit(1)
 
-        // Fetch last message
+        // Fetch last message — respect per-user hiding
         const [lastMsg] = await db
           .select({
             id: messages.id,
@@ -122,7 +123,13 @@ export async function getMatches(req, res) {
             createdAt: messages.createdAt,
           })
           .from(messages)
-          .where(and(eq(messages.matchId, row.matchId), isNull(messages.deletedAt)))
+          .where(
+            and(
+              eq(messages.matchId, row.matchId),
+              isNull(messages.deletedAt),
+              sql`(${messages.deletedForUserId} is null or ${messages.deletedForUserId} <> ${userId})`,
+            ),
+          )
           .orderBy(desc(messages.createdAt))
           .limit(1)
 
@@ -136,6 +143,7 @@ export async function getMatches(req, res) {
               eq(messages.senderId, partnerId),
               eq(messages.isRead, false),
               isNull(messages.deletedAt),
+              sql`(${messages.deletedForUserId} is null or ${messages.deletedForUserId} <> ${userId})`,
             ),
           )
 
@@ -155,6 +163,7 @@ export async function getMatches(req, res) {
             mainPhoto: photo?.storageKey ?? null,
             blurAmount: photo?.blurAmount ?? 70,
             screenshotShield: partner?.screenshotShield ?? true,
+            isPaused: Boolean(partner?.isPaused),
           },
           lastMessage: lastMsg
             ? {
@@ -197,7 +206,12 @@ export async function getMessages(req, res) {
       return res.status(403).json({ error: 'Not in this match' })
     }
 
-    const whereParts = [eq(messages.matchId, matchId), isNull(messages.deletedAt)]
+    const whereParts = [
+      eq(messages.matchId, matchId),
+      isNull(messages.deletedAt),
+      // Hide messages this user has chosen "Delete for me" on.
+      sql`(${messages.deletedForUserId} is null or ${messages.deletedForUserId} <> ${userId})`,
+    ]
     if (cursor) {
       whereParts.push(
         sql`(${messages.createdAt} < ${cursor.createdAt} OR (${messages.createdAt} = ${cursor.createdAt} AND ${messages.id} < ${cursor.id}))`,
@@ -265,6 +279,18 @@ export async function sendMessage(req, res) {
     }
 
     const recipientId = isUserA ? match.userBId : match.userAId
+
+    // Block sending to paused partners (Instagram-style "unreachable").
+    const [recipient] = await db
+      .select({ isPaused: users.isPaused })
+      .from(users)
+      .where(eq(users.id, recipientId))
+      .limit(1)
+    if (recipient?.isPaused) {
+      return res
+        .status(403)
+        .json({ error: 'recipient_paused', message: 'This person has paused their account.' })
+    }
 
     // Free-tier gating
     const [sender] = await db
@@ -563,6 +589,86 @@ export async function deleteMessage(req, res) {
   } catch (err) {
     console.error('deleteMessage error:', err.message)
     return res.status(500).json({ error: 'Failed to delete message' })
+  }
+}
+
+// ── DELETE /user/matches/:matchId/messages?scope=me|everyone ──
+// Bulk-delete all messages in a thread.
+//   scope=me        → hide every message in the thread for the caller only
+//                     (sets deletedForUserId on each row; partner still sees them)
+//   scope=everyone  → soft-delete every message the caller sent (sets deletedAt);
+//                     messages the partner sent stay untouched
+export async function deleteAllMessages(req, res) {
+  try {
+    const userId = req.user.id
+    const { matchId } = req.params
+    const scope = (req.query.scope || 'me').toString()
+
+    if (scope !== 'me' && scope !== 'everyone') {
+      return res.status(400).json({ error: 'Invalid scope' })
+    }
+
+    const [match] = await db
+      .select()
+      .from(matches)
+      .where(and(eq(matches.id, matchId), eq(matches.isActive, true)))
+      .limit(1)
+
+    if (!match) return res.status(404).json({ error: 'Match not found' })
+    const isUserA = match.userAId === userId
+    if (!isUserA && match.userBId !== userId) {
+      return res.status(403).json({ error: 'Not in this match' })
+    }
+
+    if (scope === 'me') {
+      await db
+        .update(messages)
+        .set({ deletedForUserId: userId })
+        .where(
+          and(
+            eq(messages.matchId, matchId),
+            isNull(messages.deletedAt),
+            isNull(messages.deletedForUserId),
+          ),
+        )
+    } else {
+      await db
+        .update(messages)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            eq(messages.matchId, matchId),
+            eq(messages.senderId, userId),
+            isNull(messages.deletedAt),
+          ),
+        )
+    }
+
+    const newCount = await getVisibleSentMessageCount(matchId, userId)
+    const countField = isUserA
+      ? { messageCountUserA: newCount }
+      : { messageCountUserB: newCount }
+    await db
+      .update(matches)
+      .set({ ...countField, updatedAt: new Date() })
+      .where(eq(matches.id, matchId))
+
+    // Notify partner only when the change is visible to them
+    if (scope === 'everyone') {
+      const io = getIO()
+      if (io) {
+        io.to(`match:${matchId}`).emit('messages:cleared', {
+          matchId,
+          scope: 'everyone',
+          clearedBy: userId,
+        })
+      }
+    }
+
+    return res.json({ ok: true, scope })
+  } catch (err) {
+    console.error('deleteAllMessages error:', err.message)
+    return res.status(500).json({ error: 'Failed to delete messages' })
   }
 }
 

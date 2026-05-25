@@ -8,6 +8,7 @@ import {
   requestUnlock,
   unmatch,
   deleteMessage,
+  deleteAllMessages,
   getPartnerProfile,
 } from '../../controllers/User/chat.js'
 import { initiateCall, updateCallStatus, getCallHistory } from '../../controllers/User/call.js'
@@ -24,6 +25,7 @@ router.get('/matches/:matchId/messages', requireAuth, getMessages)
 router.post('/matches/:matchId/messages', requireAuth, sendMessage)
 router.patch('/matches/:matchId/read', requireAuth, markRead)
 router.delete('/matches/:matchId/messages/:messageId', requireAuth, deleteMessage)
+router.delete('/matches/:matchId/messages', requireAuth, deleteAllMessages)
 
 // Photo unlock
 router.post('/matches/:matchId/unlock', requireAuth, requestUnlock)
