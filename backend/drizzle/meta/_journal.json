@@ -43,6 +43,13 @@
       "when": 1779374312003,
       "tag": "0005_empty_colossus",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779706764490,
+      "tag": "0006_lonely_electro",
+      "breakpoints": true
     }
   ]
 }
