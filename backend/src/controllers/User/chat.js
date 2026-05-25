@@ -3,6 +3,7 @@ import { db } from '../../../db/index.js'
 import { likes, matches } from '../../../db/schema/matching.js'
 import { messages } from '../../../db/schema/messaging.js'
 import { users, userPhotos, userPrompts, userInterests, userLifestyle } from '../../../db/schema/users.js'
+import { userPrivacySettings } from '../../../db/schema/settings.js'
 import { blocks } from '../../../db/schema/safety.js'
 import { attachUsersToMatchRoom, getIO, isUserReadingMatch } from '../../socket/index.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../../services/notifications/chatNotification.js'
@@ -89,8 +90,13 @@ export async function getMatches(req, res) {
             handle: users.handle,
             age: users.age,
             verified: users.idVerified,
+            screenshotShield: userPrivacySettings.screenshotShield,
           })
           .from(users)
+          .leftJoin(
+            userPrivacySettings,
+            eq(userPrivacySettings.userId, users.id),
+          )
           .where(eq(users.id, partnerId))
           .limit(1)
 
@@ -148,6 +154,7 @@ export async function getMatches(req, res) {
             verified: Boolean(partner?.verified),
             mainPhoto: photo?.storageKey ?? null,
             blurAmount: photo?.blurAmount ?? 70,
+            screenshotShield: partner?.screenshotShield ?? true,
           },
           lastMessage: lastMsg
             ? {
