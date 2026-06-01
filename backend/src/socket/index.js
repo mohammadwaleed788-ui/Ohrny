@@ -131,15 +131,17 @@ export function initSocket(server) {
 
         // Free-tier gating
         const [sender] = await db
-          .select({ plan: users.plan })
+          .select({ plan: users.plan, iam: users.iam })
           .from(users)
           .where(eq(users.id, userId))
           .limit(1)
 
+        const isWoman = sender?.iam === 'woman'
         const isFree = !sender || sender.plan === 'free'
         const myMsgCount = await getVisibleSentMessageCount(matchId, userId)
 
-        if (isFree) {
+        // Women have unlimited messaging regardless of plan
+        if (isFree && !isWoman) {
           if (myMsgCount >= FREE_MESSAGE_LIMIT) {
             return ack?.({ error: 'message_limit', paywall: 'messages' })
           }
@@ -153,7 +155,11 @@ export function initSocket(server) {
         }
 
         const now = new Date()
-        const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+        // Ephemeral only for Plus users; free users get permanent messages
+        const isEphemeral = !isFree
+        const expiresAt = isEphemeral
+          ? new Date(now.getTime() + 24 * 60 * 60 * 1000)
+          : null
 
         const [msg] = await db
           .insert(messages)
@@ -161,7 +167,7 @@ export function initSocket(server) {
             matchId,
             senderId: userId,
             content: content.trim(),
-            isEphemeral: true,
+            isEphemeral,
             expiresAt,
             createdAt: now,
           })
