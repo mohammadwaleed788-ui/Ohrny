@@ -225,6 +225,13 @@ export async function createPersona(req, res) {
     const orientation = normalizeOrientation(body.orientation)
     const interests = Array.isArray(body.interests) ? body.interests : []
     const photos = Array.isArray(body.photos) && body.photos.length ? body.photos : [1, 2, 3].map((position) => ({ position }))
+    const prompts = Array.isArray(body.prompts) && body.prompts.length
+      ? body.prompts
+      : [
+          { position: 1, title: 'A PERFECT SUNDAY', answer: 'Coffee, a long walk, and a conversation that accidentally lasts two hours.' },
+          { position: 2, title: 'NON-NEGOTIABLES', answer: 'Kindness, curiosity, and a real laugh.' },
+          { position: 3, title: 'CONVERSATION STARTER', answer: 'Tell me the small thing you are weirdly passionate about.' },
+        ]
 
     const [created] = await db.transaction(async (tx) => {
       const [inserted] = await tx
@@ -293,6 +300,15 @@ export async function createPersona(req, res) {
           })),
         )
       }
+
+      await tx.insert(userPrompts).values(
+        prompts.slice(0, 3).map((prompt, index) => ({
+          userId: inserted.id,
+          position: clampInt(prompt.position, 1, 3, index + 1),
+          title: prompt.title ? String(prompt.title).slice(0, 80) : `Prompt ${index + 1}`,
+          answer: prompt.answer ? String(prompt.answer).slice(0, 160) : 'Ask me anything.',
+        })),
+      )
 
       return [inserted]
     })

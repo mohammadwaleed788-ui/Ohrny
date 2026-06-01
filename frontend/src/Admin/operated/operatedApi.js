@@ -1,6 +1,6 @@
-import { API_BASE_URL, getAccessToken } from '../../services/apiClient'
+import { API_BASE_URL, apiGet, apiPatch, apiPost } from '../../services/apiClient'
 
-async function request(path, options = {}, token = getAccessToken()) {
+async function request(path, options = {}, token) {
   const headers = new Headers(options.headers)
   if (!headers.has('Content-Type') && options.body) headers.set('Content-Type', 'application/json')
   if (token) headers.set('Authorization', `Bearer ${token}`)
@@ -22,15 +22,15 @@ async function request(path, options = {}, token = getAccessToken()) {
 }
 
 export function adminGet(path) {
-  return request(path)
+  return apiGet(path)
 }
 
 export function adminPost(path, body) {
-  return request(path, { method: 'POST', body: JSON.stringify(body ?? {}) })
+  return apiPost(path, body)
 }
 
 export function adminPatch(path, body) {
-  return request(path, { method: 'PATCH', body: JSON.stringify(body ?? {}) })
+  return apiPatch(path, body)
 }
 
 export function userGet(path, token) {
@@ -44,4 +44,3 @@ export function userPost(path, body, token) {
 export function userPatch(path, body, token) {
   return request(path, { method: 'PATCH', body: JSON.stringify(body ?? {}) }, token)
 }
-

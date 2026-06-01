@@ -12,6 +12,38 @@ const suggestionText = {
   'Check in after silence': 'hey, you disappeared on me. still around?',
 }
 
+const POLL_INTERVAL_MS = 8000
+
+function stableHue(value) {
+  return Math.abs(String(value || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 360
+}
+
+function mapMatchToThread(match) {
+  return {
+    id: match.matchId,
+    name: match.partner?.handle || 'Unknown',
+    handle: match.partner?.handle || '',
+    preview: match.lastMessage?.content || 'Matched. Start the conversation.',
+    time: match.lastMessage?.createdAt ? new Date(match.lastMessage.createdAt).toLocaleString() : 'new',
+    timeRank: match.lastMessage?.createdAt ? -new Date(match.lastMessage.createdAt).getTime() : 0,
+    unread: match.unreadCount || 0,
+    flagged: false,
+    age: match.partner?.age,
+    hue: stableHue(match.partner?.id || match.matchId),
+    matchedOn: match.matchedAt ? new Date(match.matchedAt).toLocaleDateString() : '',
+    raw: match,
+  }
+}
+
+function mapApiMessages(messages = []) {
+  return [...messages].reverse().map((message) => ({
+    id: message.id,
+    from: message.fromMe ? 'mine' : 'them',
+    text: message.content,
+    time: message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : '',
+  }))
+}
+
 export function InboxView({ persona, userToken }) {
   const [threads, setThreads] = useState([])
   const [loading, setLoading] = useState(false)
@@ -21,43 +53,40 @@ export function InboxView({ persona, userToken }) {
   const [search, setSearch] = useState('')
   const [selectedByPersona, setSelectedByPersona] = useState({})
   const [draftByThread, setDraftByThread] = useState({})
-  const [messageOverrides, setMessageOverrides] = useState({})
   const [loadedMessages, setLoadedMessages] = useState({})
 
   useEffect(() => {
     let cancelled = false
+    let intervalId = null
     if (!userToken) return undefined
-    queueMicrotask(() => {
-      if (!cancelled) setLoading(true)
-    })
-    userGet('/user/matches', userToken)
-      .then(({ matches }) => {
-        if (!cancelled) {
-          setThreads(matches.map((match) => ({
-            id: match.matchId,
-            name: match.partner?.handle || 'Unknown',
-            handle: match.partner?.handle || '',
-            preview: match.lastMessage?.content || 'Matched. Start the conversation.',
-            time: match.lastMessage?.createdAt ? new Date(match.lastMessage.createdAt).toLocaleString() : 'new',
-            timeRank: match.lastMessage?.createdAt ? -new Date(match.lastMessage.createdAt).getTime() : 0,
-            unread: match.unreadCount || 0,
-            flagged: false,
-            age: match.partner?.age,
-            hue: Math.abs(String(match.partner?.id || match.matchId).split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 360,
-            matchedOn: match.matchedAt ? new Date(match.matchedAt).toLocaleDateString() : '',
-            raw: match,
-          })))
-          setError('')
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message || 'Failed to load matches')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+
+    const loadMatches = ({ showLoading = false } = {}) => {
+      if (showLoading) {
+        queueMicrotask(() => {
+          if (!cancelled) setLoading(true)
+        })
+      }
+      userGet('/user/matches', userToken)
+        .then(({ matches }) => {
+          if (!cancelled) {
+            setThreads((matches || []).map(mapMatchToThread))
+            setError('')
+          }
+        })
+        .catch((err) => {
+          if (!cancelled && err.status !== 429) setError(err.message || 'Failed to load matches')
+        })
+        .finally(() => {
+          if (!cancelled && showLoading) setLoading(false)
+        })
+    }
+
+    loadMatches({ showLoading: true })
+    intervalId = setInterval(() => loadMatches(), POLL_INTERVAL_MS)
+
     return () => {
       cancelled = true
+      if (intervalId) clearInterval(intervalId)
     }
   }, [userToken])
 
@@ -82,29 +111,41 @@ export function InboxView({ persona, userToken }) {
   const visible = filtered.slice(0, 120)
   useEffect(() => {
     let cancelled = false
-    if (!current?.id || !userToken || loadedMessages[current.id]) return undefined
-    userGet(`/user/matches/${current.id}/messages`, userToken)
-      .then(({ messages }) => {
-        if (!cancelled) {
-          setLoadedMessages((value) => ({
-            ...value,
-            [current.id]: [...messages].reverse().map((message) => ({
-              id: message.id,
-              from: message.fromMe ? 'mine' : 'them',
-              text: message.content,
-              time: message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : '',
-            })),
-          }))
-          userPatch(`/user/matches/${current.id}/read`, {}, userToken).catch(() => {})
-        }
-      })
-      .catch(() => {})
+    let intervalId = null
+    let markedRead = false
+    if (!current?.id || !userToken) return undefined
+
+    const loadMessages = () => {
+      userGet(`/user/matches/${current.id}/messages`, userToken)
+        .then(({ messages: apiMessages }) => {
+          if (!cancelled) {
+            setLoadedMessages((value) => ({
+              ...value,
+              [current.id]: mapApiMessages(apiMessages),
+            }))
+            if (!markedRead) {
+              markedRead = true
+              userPatch(`/user/matches/${current.id}/read`, {}, userToken).catch(() => {})
+            }
+          }
+        })
+        .catch((err) => {
+          if (!cancelled && err.status !== 429) setError(err.message || 'Failed to load messages')
+        })
+    }
+
+    queueMicrotask(() => {
+      if (!cancelled) loadMessages()
+    })
+    intervalId = setInterval(loadMessages, POLL_INTERVAL_MS)
+
     return () => {
       cancelled = true
+      if (intervalId) clearInterval(intervalId)
     }
-  }, [current?.id, loadedMessages, userToken])
+  }, [current?.id, userToken])
 
-  const messages = messageOverrides[current?.id] ?? loadedMessages[current?.id] ?? []
+  const messages = loadedMessages[current?.id] ?? []
   const draft = draftByThread[current?.id] ?? ''
   const totalUnread = threads.reduce((sum, thread) => sum + thread.unread, 0)
   const totalFlagged = threads.filter((thread) => thread.flagged).length
@@ -117,15 +158,15 @@ export function InboxView({ persona, userToken }) {
     userPost(`/user/matches/${current.id}/messages`, { content: draft.trim() }, userToken)
       .then(({ message }) => {
         const sent = { id: message.id, from: 'mine', text: message.content, time: 'just now' }
-        setMessageOverrides((value) => ({ ...value, [current.id]: [...messages, sent] }))
+        setLoadedMessages((value) => ({ ...value, [current.id]: [...(value[current.id] || []), sent] }))
         setDraft('')
       })
       .catch((err) => setError(err.message || 'Failed to send message'))
   }
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[380px_1fr] gap-4 p-4">
-      <div className={`grid min-h-0 grid-rows-[auto_auto_1fr] rounded-lg border ${op.borderSoft} ${op.bgElev}`}>
+    <div className="grid h-full min-h-0 grid-cols-[380px_1fr] gap-4 overflow-hidden p-4">
+      <div className={`grid min-h-0 grid-rows-[auto_auto_1fr] overflow-hidden rounded-lg border ${op.borderSoft} ${op.bgElev}`}>
         <div className={`space-y-3 border-b ${op.borderSoft} p-3`}>
           <div className={`flex items-center gap-2 rounded-md border ${op.borderSoft} ${op.bgElev2} px-3 py-2 ${op.mute}`}>
             <Search className="h-4 w-4" />
@@ -164,7 +205,7 @@ export function InboxView({ persona, userToken }) {
           {loading ? 'Loading chats...' : `${filtered.length.toLocaleString()} of ${threads.length.toLocaleString()} chats - ${filtered.reduce((sum, thread) => sum + thread.unread, 0).toLocaleString()} unread`}
         </div>
 
-        <div className="min-h-0 overflow-y-auto">
+        <div className={`min-h-0 overflow-y-auto ${op.scrollbar}`}>
           {error && <div className={`p-4 text-sm ${op.bad}`}>{error}</div>}
           {visible.map((thread) => (
             <button
@@ -190,9 +231,9 @@ export function InboxView({ persona, userToken }) {
         </div>
       </div>
 
-      <div className={`grid min-h-0 grid-rows-[auto_auto_1fr_auto] rounded-lg border ${op.borderSoft} ${op.bgElev}`}>
+      <div className={`grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border ${op.borderSoft} ${op.bgElev}`}>
         {!current ? (
-          <div className={`grid place-items-center ${op.mute}`}>Pick a conversation.</div>
+          <div className={`grid h-full place-items-center ${op.mute}`}>Pick a conversation.</div>
         ) : (
           <>
             <div className={`flex items-center gap-3 border-b ${op.borderSoft} p-4`}>
@@ -211,7 +252,7 @@ export function InboxView({ persona, userToken }) {
               <span><b className={op.dim}>Matched</b> - {current.matchedOn}</span>
               <span><b className={op.dim}>Compat</b> - 82%</span>
             </div>
-            <div className="min-h-0 space-y-3 overflow-y-auto p-4">
+            <div className={`min-h-0 space-y-3 overflow-y-auto p-4 ${op.scrollbar}`}>
               <div className={`text-center font-mono text-[11px] ${op.mute}`}>Conversation start - matched {current.matchedOn}</div>
               {messages.map((message) => (
                 <div key={message.id} className={`flex ${message.from === 'mine' ? 'justify-end' : 'justify-start'}`}>

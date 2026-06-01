@@ -106,7 +106,7 @@ export function FeedView({ persona, userToken }) {
         </div>
       </section>
 
-      <aside className="min-h-0 space-y-4 overflow-y-auto">
+      <aside className={`min-h-0 space-y-4 overflow-y-auto ${op.scrollbar}`}>
         <section className={`rounded-lg border ${op.borderSoft} ${op.bgElev} p-4`}>
           <h2 className={`text-sm font-semibold ${op.text}`}>Filters</h2>
           <div className={`mt-3 space-y-2 text-sm ${op.dim}`}>

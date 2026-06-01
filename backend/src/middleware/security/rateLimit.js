@@ -1,8 +1,19 @@
 import rateLimit from 'express-rate-limit'
 
+const routesWithDedicatedLimiters = new Set([
+  '/api/admin/auth/login',
+  '/api/admin/auth/verify-totp',
+  '/api/admin/auth/refresh',
+  '/api/user/auth/send-otp',
+  '/api/user/auth/verify-otp',
+  '/api/user/auth/refresh',
+  '/api/user/auth/check-handle',
+])
+
 export const globalLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 300,
+  skip: (req) => routesWithDedicatedLimiters.has(req.path),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests' },

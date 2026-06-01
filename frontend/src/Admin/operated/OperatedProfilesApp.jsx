@@ -10,9 +10,11 @@ import { ProfileView } from './ProfileView'
 import { FeedView } from './FeedView'
 import { DashboardView } from './DashboardView'
 import { NewPersonaModal } from './NewPersonaModal'
+import { LikesView } from './LikesView'
 
 const tabs = [
   { id: 'inbox', label: 'Inbox' },
+  { id: 'likes', label: 'Likes' },
   { id: 'profile', label: 'Profile' },
   { id: 'feed', label: 'Feed' },
   { id: 'dashboard', label: 'Dashboard' },
@@ -92,8 +94,8 @@ export default function OperatedProfilesApp() {
       smokes: nextPersona.smokes,
       kids: nextPersona.kids,
       edu: nextPersona.edu,
-      interests: nextPersona.interests,
-      photos: nextPersona.photosList,
+      interests: Array.isArray(nextPersona.interests) ? nextPersona.interests : [],
+      photos: Array.isArray(nextPersona.photosList) ? nextPersona.photosList : undefined,
     }
     const { persona: saved } = await adminPatch(`/admin/operated/personas/${nextPersona.id}`, payload)
     setPersonas((value) => value.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)))
@@ -104,8 +106,26 @@ export default function OperatedProfilesApp() {
       name: draft.name,
       age: draft.age,
       gender: draft.gender,
+      orientation: draft.orientation,
+      intent: draft.intent,
+      relStatus: draft.relStatus,
       city: draft.city,
+      countryCode: draft.countryCode,
+      latApprox: draft.latApprox,
+      lngApprox: draft.lngApprox,
       bio: draft.bio || 'New persona bio.',
+      work: draft.work,
+      height: draft.height,
+      edu: draft.edu,
+      drinks: draft.drinks,
+      smokes: draft.smokes,
+      kids: draft.kids,
+      interests: draft.interests,
+      photos: draft.photos,
+      maxDistance: draft.maxDistance,
+      ageMin: draft.ageMin,
+      ageMax: draft.ageMax,
+      prompts: draft.prompts,
     })
     setPersonas((value) => [...value, next])
     setSelectedId(next.id)
@@ -142,7 +162,7 @@ export default function OperatedProfilesApp() {
           onNew={() => setNewOpen(true)}
         />
 
-        <section className="grid min-h-0 grid-rows-[54px_1fr]">
+        <section className="grid min-h-0 grid-rows-[54px_1fr] overflow-hidden">
           <div className={`flex items-center gap-2 border-b ${op.borderSoft} px-5`}>
             {tabs.map((item) => (
               <button
@@ -169,11 +189,12 @@ export default function OperatedProfilesApp() {
             }
           </div>
 
-          <div className="min-h-0">
+          <div className="min-h-0 overflow-hidden">
             {loading && <div className={`grid h-full place-items-center ${op.mute}`}>Loading operated personas...</div>}
             {!loading && error && <div className={`grid h-full place-items-center ${op.bad}`}>{error}</div>}
             {!loading && !error && !persona && <div className={`grid h-full place-items-center ${op.mute}`}>Create an operated persona to begin.</div>}
             {!loading && !error && persona && tab === 'inbox' && <InboxView persona={persona} userToken={operatedToken} />}
+            {!loading && !error && persona && tab === 'likes' && <LikesView persona={persona} userToken={operatedToken} onMatched={() => setTab('inbox')} />}
             {!loading && !error && persona && tab === 'profile' && <ProfileView persona={persona} onChange={updatePersona} />}
             {!loading && !error && persona && tab === 'feed' && <FeedView persona={persona} userToken={operatedToken} />}
             {!loading && !error && persona && tab === 'dashboard' && <DashboardView persona={persona} />}

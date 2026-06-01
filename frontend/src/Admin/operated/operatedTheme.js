@@ -17,6 +17,7 @@ export const op = {
   warnBg: 'bg-[oklch(0.82_0.14_80_/_0.14)]',
   bad: 'text-[oklch(0.70_0.19_25)]',
   badBg: 'bg-[oklch(0.70_0.19_25_/_0.14)]',
+  scrollbar: '[scrollbar-width:thin] [scrollbar-color:oklch(0.38_0.012_260)_oklch(0.18_0.008_260)] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-[oklch(0.18_0.008_260)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-[oklch(0.18_0.008_260)] [&::-webkit-scrollbar-thumb]:bg-[oklch(0.36_0.012_260)] hover:[&::-webkit-scrollbar-thumb]:bg-[oklch(0.46_0.014_260)]',
 }
 
 export function avatarGradient(hue) {

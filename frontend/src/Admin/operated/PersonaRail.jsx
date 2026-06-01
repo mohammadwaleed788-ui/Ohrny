@@ -28,7 +28,7 @@ export function PersonaRail({ personas, selectedId, unreadByPersona, search, onS
           onChange={(event) => onSearchChange(event.target.value)}
         />
       </div>
-      <div className="min-h-0 overflow-y-auto px-1.5">
+      <div className={`min-h-0 overflow-y-auto px-1.5 ${op.scrollbar}`}>
         {filtered.map((persona) => (
           <button
             key={persona.id}

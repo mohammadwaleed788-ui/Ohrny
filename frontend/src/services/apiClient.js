@@ -137,4 +137,25 @@ export async function apiPost(path, body, options = {}) {
   return res.json()
 }
 
+export async function apiPatch(path, body, options = {}) {
+  const res = await fetchWithAuth(path, {
+    ...options,
+    method: 'PATCH',
+    body: JSON.stringify(body ?? {}),
+  })
+  if (!res.ok) {
+    let message = `Request failed with status ${res.status}`
+    try {
+      const data = await res.json()
+      if (data?.error) message = data.error
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(message)
+    err.status = res.status
+    throw err
+  }
+  return res.json()
+}
+
 export { API_BASE_URL }
