@@ -11,7 +11,7 @@ import {
   deleteAllMessages,
   getPartnerProfile,
 } from '../../controllers/User/chat.js'
-import { initiateCall, updateCallStatus, getCallHistory } from '../../controllers/User/call.js'
+import { initiateCall, updateCallStatus, getCallHistory, getZegoToken } from '../../controllers/User/call.js'
 
 const router = Router()
 
@@ -34,5 +34,6 @@ router.post('/matches/:matchId/unlock', requireAuth, requestUnlock)
 router.post('/matches/:matchId/calls', requireAuth, initiateCall)
 router.get('/matches/:matchId/calls', requireAuth, getCallHistory)
 router.patch('/calls/:callId', requireAuth, updateCallStatus)
+router.post('/calls/zego-token', requireAuth, getZegoToken)
 
 export default router

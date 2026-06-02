@@ -39,7 +39,7 @@ export async function notifyPhotoUnlockRequest(recipientId, senderHandle, matchI
     .catch((err) => console.error('notifyPhotoUnlockRequest failed:', err.message))
 }
 
-export async function notifyIncomingCall(recipientId, callerHandle, callType) {
+export async function notifyIncomingCall(recipientId, callerHandle, callType, { callId, matchId } = {}) {
   const handle = callerHandle || 'Someone'
   const label = callType === 'video' ? 'video' : 'voice'
 
@@ -52,6 +52,8 @@ export async function notifyIncomingCall(recipientId, callerHandle, callType) {
     type: 'incoming_call',
     callerHandle: handle,
     callType: label,
+    callId: callId ?? '',
+    matchId: matchId ?? '',
   }
 
   getUserFcmTokens(recipientId)

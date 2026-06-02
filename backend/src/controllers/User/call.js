@@ -5,6 +5,7 @@ import { calls } from '../../../db/schema/messaging.js'
 import { users } from '../../../db/schema/users.js'
 import { getIO } from '../../socket/index.js'
 import { notifyIncomingCall } from '../../services/notifications/chatNotification.js'
+import { generateZegoToken, ZEGO_APP_ID } from '../../services/zegoService.js'
 
 const VALID_CALL_TYPES = ['voice', 'video']
 const VALID_STATUS_UPDATES = ['answered', 'declined', 'ended', 'missed']
@@ -50,23 +51,26 @@ export async function initiateCall(req, res) {
       })
       .returning()
 
-    // Emit via Socket.IO
+    // Emit only to the callee — never broadcast to the full match room
+    // (that would send the event to the caller too)
     const io = getIO()
     if (io) {
-      io.to(`match:${matchId}`).emit('call:incoming', {
-        callId: call.id,
-        matchId,
-        callerId: userId,
-        callerHandle: req.user.handle,
-        type,
-      })
-
       const calleeSockets = await io.in(`user:${calleeId}`).fetchSockets()
-      if (calleeSockets.length === 0) {
-        notifyIncomingCall(calleeId, req.user.handle, type)
+      if (calleeSockets.length > 0) {
+        // Callee is online — deliver via socket
+        io.to(`user:${calleeId}`).emit('call:incoming', {
+          callId: call.id,
+          matchId,
+          callerId: userId,
+          callerHandle: req.user.handle,
+          type,
+        })
+      } else {
+        // Callee is offline — deliver via push notification
+        notifyIncomingCall(calleeId, req.user.handle, type, { callId: call.id, matchId })
       }
     } else {
-      notifyIncomingCall(calleeId, req.user.handle, type)
+      notifyIncomingCall(calleeId, req.user.handle, type, { callId: call.id, matchId })
     }
 
     return res.json({ ok: true, call })
@@ -121,10 +125,11 @@ export async function updateCallStatus(req, res) {
       .where(eq(calls.id, callId))
       .returning()
 
-    // Notify the other participant via Socket.IO
+    // Notify only the OTHER participant — never echo back to sender
     const io = getIO()
     if (io) {
-      io.to(`match:${call.matchId}`).emit('call:status', {
+      const otherId = call.callerId === userId ? call.calleeId : call.callerId
+      io.to(`user:${otherId}`).emit('call:status', {
         callId,
         matchId: call.matchId,
         status: updated.status,
@@ -183,5 +188,43 @@ export async function getCallHistory(req, res) {
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed to load call history' })
+  }
+}
+
+// ── POST /user/calls/zego-token ───────────────────────────────
+// Returns a short-lived ZegoCloud token for the calling user.
+// roomId = matchId so both participants join the same room.
+export async function getZegoToken(req, res) {
+  try {
+    const userId = req.user.id
+    const { matchId } = req.body || {}
+
+    if (!matchId) {
+      return res.status(400).json({ error: 'matchId is required' })
+    }
+
+    // Verify caller is in this match
+    const [match] = await db
+      .select({ userAId: matches.userAId, userBId: matches.userBId })
+      .from(matches)
+      .where(and(eq(matches.id, matchId), eq(matches.isActive, true)))
+      .limit(1)
+
+    if (!match) return res.status(404).json({ error: 'Match not found' })
+    if (match.userAId !== userId && match.userBId !== userId) {
+      return res.status(403).json({ error: 'Not in this match' })
+    }
+
+    const token = generateZegoToken(userId, 3600)
+
+    return res.json({
+      token,
+      appId: ZEGO_APP_ID,
+      roomId: matchId,
+      userId,
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Failed to generate call token' })
   }
 }
