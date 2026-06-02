@@ -309,6 +309,17 @@ export function initSocket(server) {
       })
     })
 
+    // ── call:masked — relay masked/reveal state to the other participant ──
+    socket.on('call:masked', (data) => {
+      const { matchId, masked } = data || {}
+      if (!matchId || typeof masked !== 'boolean') return
+      // socket.to() excludes the sender — only the other user in the match receives this
+      socket.to(`match:${matchId}`).emit('call:masked', {
+        senderId: userId,
+        masked,
+      })
+    })
+
     socket.on('disconnect', () => {
       // Cleanup handled automatically by Socket.IO room leave
     })
