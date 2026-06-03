@@ -309,6 +309,13 @@ export function initSocket(server) {
       })
     })
 
+    // ── call:ringing — callee tells the caller their phone is now ringing ──
+    socket.on('call:ringing', (data) => {
+      const { matchId } = data || {}
+      if (!matchId) return
+      socket.to(`match:${matchId}`).emit('call:ringing', { senderId: userId })
+    })
+
     // ── call:media — relay full media state (mute/camera/mask) to the other ──
     socket.on('call:media', (data) => {
       const { matchId, muted, camOff, masked } = data || {}
