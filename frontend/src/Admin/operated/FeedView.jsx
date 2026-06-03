@@ -64,7 +64,7 @@ export function FeedView({ persona, userToken }) {
   }
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[1fr_360px] gap-4 overflow-hidden p-4">
+    <div className={`grid h-full min-h-0 flex-1 grid-cols-[1fr_360px] gap-4 overflow-y-auto p-4 ${op.scrollbar}`}>
       <section className={`grid min-h-0 place-items-center rounded-lg border ${op.borderSoft} ${op.bgElev} p-6`}>
         <div className="w-full max-w-[460px] space-y-4">
           <div className="flex flex-wrap gap-2">

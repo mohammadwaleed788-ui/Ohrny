@@ -50,7 +50,7 @@ export function LikesView({ persona, userToken, onMatched }) {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-4">
+    <div className={`h-full min-h-0 flex-1 overflow-y-auto p-4 ${op.scrollbar}`}>
       <div className={`mb-4 flex items-center gap-3 rounded-lg border ${op.borderSoft} ${op.bgElev} p-4`}>
         <div>
           <h2 className={`text-base font-semibold ${op.text}`}>Received likes</h2>

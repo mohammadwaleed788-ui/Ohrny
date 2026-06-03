@@ -21,7 +21,7 @@ export function ProfileView({ persona, onChange }) {
   const removeInterest = (interest) => set('interests', interests.filter((item) => item !== interest))
 
   return (
-    <div className={`grid min-h-0 flex-1 grid-cols-[1fr_320px] gap-4 overflow-y-auto p-4 ${op.scrollbar}`}>
+    <div className={`grid h-full min-h-0 flex-1 grid-cols-[1fr_320px] gap-4 overflow-y-auto p-4 ${op.scrollbar}`}>
       <div className="space-y-4">
         <section className={`rounded-lg border ${op.borderSoft} ${op.bgElev} p-4`}>
           <h2 className={`text-sm font-semibold ${op.text}`}>Identity</h2>

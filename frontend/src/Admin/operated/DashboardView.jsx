@@ -21,7 +21,7 @@ export function DashboardView({ persona }) {
   }, [persona.id])
 
   return (
-    <div className={`min-h-0 flex-1 space-y-4 overflow-y-auto p-4 ${op.scrollbar}`}>
+    <div className={`h-full min-h-0 flex-1 space-y-4 overflow-y-auto p-4 ${op.scrollbar}`}>
       <div className="grid grid-cols-4 gap-4">
         {[
           ['Matches (lifetime)', stats.matches, '+12 this week'],
