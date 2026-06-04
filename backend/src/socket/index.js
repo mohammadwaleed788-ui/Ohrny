@@ -3,7 +3,7 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm'
 import { socketAuthMiddleware } from './auth.js'
 import { db } from '../../db/index.js'
 import { matches } from '../../db/schema/matching.js'
-import { messages } from '../../db/schema/messaging.js'
+import { calls, messages } from '../../db/schema/messaging.js'
 import { users } from '../../db/schema/users.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../services/notifications/chatNotification.js'
 
@@ -52,6 +52,65 @@ async function joinSocketToMatchIfMember(socket, matchId) {
 
   socket.join(`match:${matchId}`)
   return true
+}
+
+function isTerminalCallStatus(status) {
+  return status === 'ended' || status === 'declined' || status === 'missed'
+}
+
+async function getSocketCall(callId, matchId, userId) {
+  if (!callId || !matchId || !userId) return null
+
+  const [call] = await db
+    .select()
+    .from(calls)
+    .where(and(eq(calls.id, callId), eq(calls.matchId, matchId)))
+    .limit(1)
+
+  if (!call) return null
+  if (call.callerId !== userId && call.calleeId !== userId) return null
+  return call
+}
+
+async function endActiveCallForDisconnectedSocket(socket) {
+  const activeCall = socket.data?.activeCall
+  if (!activeCall?.callId || !activeCall?.matchId) return
+
+  socket.data.activeCall = null
+
+  try {
+    const call = await getSocketCall(activeCall.callId, activeCall.matchId, socket.userId)
+    if (!call || isTerminalCallStatus(call.status)) return
+
+    const now = new Date()
+    const updates = {
+      status: 'ended',
+      endedAt: now,
+    }
+
+    if (call.startedAt) {
+      updates.durationSeconds = Math.round((now.getTime() - new Date(call.startedAt).getTime()) / 1000)
+    }
+
+    const [updated] = await db
+      .update(calls)
+      .set(updates)
+      .where(and(eq(calls.id, call.id), eq(calls.status, call.status)))
+      .returning()
+
+    if (!updated) return
+
+    const otherId = call.callerId === socket.userId ? call.calleeId : call.callerId
+    io.to(`user:${otherId}`).emit('call:status', {
+      callId: call.id,
+      matchId: call.matchId,
+      status: 'ended',
+      updatedBy: socket.userId,
+      reason: 'disconnected',
+    })
+  } catch (err) {
+    console.error('call disconnect cleanup error:', err.message)
+  }
 }
 
 export function initSocket(server) {
@@ -309,6 +368,38 @@ export function initSocket(server) {
       })
     })
 
+    // ── call:join — mark this socket as actively participating in a call ──
+    socket.on('call:join', async (data, ack) => {
+      try {
+        const { callId, matchId } = data || {}
+        const call = await getSocketCall(callId, matchId, userId)
+        if (!call || isTerminalCallStatus(call.status)) {
+          return ack?.({ ok: false, error: 'Call not found' })
+        }
+
+        socket.join(`match:${matchId}`)
+        socket.data.activeCall = { callId, matchId }
+        ack?.({ ok: true })
+      } catch (err) {
+        console.error('call:join error:', err.message)
+        ack?.({ ok: false, error: 'Failed to join call' })
+      }
+    })
+
+    // ── call:leave — clear active-call tracking after graceful teardown ──
+    socket.on('call:leave', (data, ack) => {
+      const { callId, matchId } = data || {}
+      const activeCall = socket.data?.activeCall
+      if (
+        activeCall &&
+        (!callId || activeCall.callId === callId) &&
+        (!matchId || activeCall.matchId === matchId)
+      ) {
+        socket.data.activeCall = null
+      }
+      ack?.({ ok: true })
+    })
+
     // ── call:ringing — callee tells the caller their phone is now ringing ──
     socket.on('call:ringing', (data) => {
       const { matchId } = data || {}
@@ -330,7 +421,7 @@ export function initSocket(server) {
     })
 
     socket.on('disconnect', () => {
-      // Cleanup handled automatically by Socket.IO room leave
+      endActiveCallForDisconnectedSocket(socket)
     })
   })
 
