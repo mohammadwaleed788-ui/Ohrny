@@ -11,10 +11,13 @@ export function FeedView({ persona, userToken }) {
   const [error, setError] = useState('')
   const top = stack[0]
 
-  const loadFeed = () => {
+  const loadFeed = ({ startOver = false } = {}) => {
     if (!userToken) return
     setLoading(true)
-    userGet('/user/discover/cards?limit=20&resetPasses=true', userToken)
+    const query = startOver
+      ? '/user/discover/cards?limit=20&resetPasses=true&resetAll=true&operatedMode=true'
+      : '/user/discover/cards?limit=20&resetPasses=false&operatedMode=true'
+    userGet(query, userToken)
       .then(({ cards }) => {
         setStack(cards.map((card) => ({
           id: card.id,
@@ -47,6 +50,12 @@ export function FeedView({ persona, userToken }) {
 
   const reload = () => {
     loadFeed()
+    setMatches([])
+  }
+
+  const startOver = () => {
+    setError('')
+    loadFeed({ startOver: true })
     setMatches([])
   }
 
@@ -91,7 +100,10 @@ export function FeedView({ persona, userToken }) {
             <div className={`grid aspect-[3/4] place-items-center rounded-2xl border ${op.borderSoft} ${op.bgMain} text-center ${op.dim}`}>
               <div>
                 <div className="text-base">You have reached the end of the feed.</div>
-                <Button className="mt-4" onClick={reload}><RotateCcw className="h-4 w-4" /> Reload</Button>
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <Button onClick={reload}><RotateCcw className="h-4 w-4" /> Reload</Button>
+                  <Button tone="primary" onClick={startOver}><RotateCcw className="h-4 w-4" /> Start over</Button>
+                </div>
               </div>
             </div>
           ) : null}

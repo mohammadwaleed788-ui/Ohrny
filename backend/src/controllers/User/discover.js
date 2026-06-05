@@ -11,6 +11,9 @@ import { assertCanSwipe, consumeSwipe, getEffectiveEntitlements } from '../../se
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
+const OPERATED_HANDLE_PREFIX = 'optest_'
+const OPERATED_PHONE_PREFIX = '555019'
+const OPERATED_PHONE_COUNTRY = '+1'
 
 function clampInt(value, min, max, fallback) {
   const n = Number(value)
@@ -66,12 +69,17 @@ export async function getDiscoverCards(req, res) {
   try {
     const limit = clampInt(req.query.limit, 1, MAX_LIMIT, DEFAULT_LIMIT)
     const cursor = decodeCursor(req.query.cursor)
-    // When true (sent by "Start again"): re-show passed users but still hide liked ones
+    // resetPasses=true: re-show passed users but still hide liked ones.
+    // resetAll=true: fully restart deck and ignore swipe history.
     const resetPasses = req.query.resetPasses === 'true'
+    const resetAll = req.query.resetAll === 'true'
 
     const currentUserRows = await db
       .select({
         id: users.id,
+        handle: users.handle,
+        phone: users.phone,
+        phoneCountry: users.phoneCountry,
         latApprox: users.latApprox,
         lngApprox: users.lngApprox,
         orientation: users.orientation,
@@ -81,6 +89,14 @@ export async function getDiscoverCards(req, res) {
       .limit(1)
 
     const currentUser = currentUserRows[0]
+    const isOperatedUser = Boolean(
+      currentUser &&
+      String(currentUser.handle || '').startsWith(OPERATED_HANDLE_PREFIX) &&
+      currentUser.phoneCountry === OPERATED_PHONE_COUNTRY &&
+      String(currentUser.phone || '').startsWith(OPERATED_PHONE_PREFIX),
+    )
+    const operatedMode = req.query.operatedMode === 'true' && isOperatedUser
+
     if (!currentUser) {
       return res.status(404).json({ error: 'User not found' })
     }
@@ -105,20 +121,24 @@ export async function getDiscoverCards(req, res) {
     ])
 
     const prefs = prefsRows[0] || {}
-    const globalMode = Boolean(prefs.globalMode && entitlements?.features.globalMode)
+    const globalMode = operatedMode
+      ? true
+      : Boolean(prefs.globalMode && entitlements?.features.globalMode)
     const travelMode = Boolean(prefs.travelMode && entitlements?.features.travelMode)
     const advancedCompatibility = Boolean(
       prefs.advancedCompatibility && entitlements?.features.advancedCompatibility,
     )
     const verifiedOnly = Boolean(prefs.verifiedOnly && entitlements?.features.verifiedOnly)
-    const maxDistance = clampInt(prefs.maxDistance, 1, 200, 25)
-    const minDistance = clampInt(prefs.minDistance, 0, 100, 0)
-    const ageMin = clampInt(prefs.ageMin, 18, 99, 18)
-    const ageMax = clampInt(prefs.ageMax, 18, 99, 70)
+    const maxDistance = operatedMode ? 200 : clampInt(prefs.maxDistance, 1, 200, 25)
+    const minDistance = operatedMode ? 0 : clampInt(prefs.minDistance, 0, 100, 0)
+    const ageMin = operatedMode ? 18 : clampInt(prefs.ageMin, 18, 99, 18)
+    const ageMax = operatedMode ? 99 : clampInt(prefs.ageMax, 18, 99, 70)
     const safeMinDistance = Math.min(minDistance, maxDistance)
     const safeAgeMin = Math.min(ageMin, ageMax)
     const safeAgeMax = Math.max(ageMin, ageMax)
-    const relationshipTargets = mapRelationshipPreference(prefs.relationshipType)
+    const relationshipTargets = operatedMode
+      ? ALL_REL_GOALS
+      : mapRelationshipPreference(prefs.relationshipType)
 
     const latPattern = '^-?[0-9]+(\\.[0-9]+)?$'
     const lngPattern = '^-?[0-9]+(\\.[0-9]+)?$'
@@ -192,7 +212,9 @@ export async function getDiscoverCards(req, res) {
 
     // Exclude users already swiped. On "start again" (resetPasses=true) only
     // liked/super_liked users are hidden; passed users re-enter the deck.
-    if (resetPasses) {
+    if (resetAll) {
+      // No swipe-history exclusion on full restart.
+    } else if (resetPasses) {
       whereParts.push(
         sql`NOT EXISTS (
           SELECT 1 FROM ${likes} sl

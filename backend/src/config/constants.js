@@ -11,6 +11,7 @@ export const TOTP_STEP_TOKEN_TTL = process.env.TOTP_STEP_TOKEN_TTL || '5m'
 export const S3_REGION = process.env.S3_REGION || 'us-east-1'
 export const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME || ''
 export const S3_UPLOAD_URL_EXPIRES_SEC = Number(process.env.S3_UPLOAD_URL_EXPIRES_SEC) || 300
+export const S3_READ_URL_EXPIRES_SEC = Number(process.env.S3_READ_URL_EXPIRES_SEC) || 3600
 export const OTP_PROVIDER = String(process.env.OTP_PROVIDER || '').trim().toLowerCase()
 export const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || ''
 export const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || ''

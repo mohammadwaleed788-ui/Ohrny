@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Plus } from 'lucide-react'
 import { adminGet } from './operatedApi'
-import { Button, Chip } from './operatedStyles.jsx'
-import { avatarGradient, op } from './operatedTheme'
+import { op } from './operatedTheme'
 
 export function DashboardView({ persona }) {
   const [data, setData] = useState({ stats: persona.stats || {}, activity: [] })
@@ -37,6 +35,7 @@ export function DashboardView({ persona }) {
         ))}
       </div>
 
+      {/*
       <section className={`rounded-lg border ${op.borderSoft} ${op.bgElev}`}>
         <div className={`border-b ${op.borderSoft} p-4`}>
           <h2 className={`text-sm font-semibold ${op.text}`}>Recent activity</h2>
@@ -76,6 +75,7 @@ export function DashboardView({ persona }) {
           <Button><Plus className="h-4 w-4" /> Add teammate</Button>
         </div>
       </section>
+      */}
     </div>
   )
 }

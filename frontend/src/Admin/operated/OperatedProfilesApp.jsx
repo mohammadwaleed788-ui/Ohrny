@@ -63,6 +63,15 @@ export default function OperatedProfilesApp() {
       return undefined
     }
 
+    adminGet(`/admin/operated/personas/${persona.id}`)
+      .then(({ persona: fullPersona }) => {
+        if (cancelled || !fullPersona?.id) return
+        setPersonas((value) => value.map((item) => (item.id === fullPersona.id ? { ...item, ...fullPersona } : item)))
+      })
+      .catch(() => {
+        /* keep summary payload if detail load fails */
+      })
+
     adminPost(`/admin/operated/personas/${persona.id}/session`)
       .then(({ accessToken }) => {
         if (!cancelled) setOperatedToken(accessToken)
@@ -81,6 +90,7 @@ export default function OperatedProfilesApp() {
 
   const updatePersona = async (nextPersona) => {
     const payload = {
+      name: nextPersona.name,
       age: nextPersona.age,
       gender: nextPersona.gender,
       orientation: nextPersona.orientation,
@@ -98,7 +108,14 @@ export default function OperatedProfilesApp() {
       photos: Array.isArray(nextPersona.photosList) ? nextPersona.photosList : undefined,
     }
     const { persona: saved } = await adminPatch(`/admin/operated/personas/${nextPersona.id}`, payload)
-    setPersonas((value) => value.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)))
+    let refreshed = saved
+    try {
+      const { persona: fullPersona } = await adminGet(`/admin/operated/personas/${nextPersona.id}`)
+      if (fullPersona?.id) refreshed = fullPersona
+    } catch {
+      /* keep PATCH payload response if refresh fails */
+    }
+    setPersonas((value) => value.map((item) => (item.id === refreshed.id ? { ...item, ...refreshed } : item)))
   }
 
   const createPersona = async (draft) => {
@@ -195,7 +212,13 @@ export default function OperatedProfilesApp() {
             {!loading && !error && !persona && <div className={`grid h-full place-items-center ${op.mute}`}>Create an operated persona to begin.</div>}
             {!loading && !error && persona && tab === 'inbox' && <InboxView persona={persona} userToken={operatedToken} />}
             {!loading && !error && persona && tab === 'likes' && <LikesView persona={persona} userToken={operatedToken} onMatched={() => setTab('inbox')} />}
-            {!loading && !error && persona && tab === 'profile' && <ProfileView persona={persona} onChange={updatePersona} />}
+            {!loading && !error && persona && tab === 'profile' && (
+              <ProfileView
+                persona={persona}
+                onSave={updatePersona}
+                userToken={operatedToken}
+              />
+            )}
             {!loading && !error && persona && tab === 'feed' && <FeedView persona={persona} userToken={operatedToken} />}
             {!loading && !error && persona && tab === 'dashboard' && <DashboardView persona={persona} />}
           </div>

@@ -1,8 +1,9 @@
 import crypto from 'crypto'
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import {
   S3_BUCKET_NAME,
+  S3_READ_URL_EXPIRES_SEC,
   S3_REGION,
   S3_UPLOAD_URL_EXPIRES_SEC,
 } from '../config/constants.js'
@@ -22,6 +23,30 @@ export async function generateSignedUploadUrl(key, contentType, expiresIn = S3_U
     Bucket: S3_BUCKET_NAME,
     Key: key,
     ContentType: contentType,
+  })
+  return getSignedUrl(s3, command, { expiresIn })
+}
+
+export async function uploadBufferToS3(key, body, contentType) {
+  if (!S3_BUCKET_NAME) {
+    throw new Error('S3_BUCKET_NAME is not configured')
+  }
+  const command = new PutObjectCommand({
+    Bucket: S3_BUCKET_NAME,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+  })
+  return s3.send(command)
+}
+
+export async function generateSignedReadUrl(key, expiresIn = S3_READ_URL_EXPIRES_SEC) {
+  if (!S3_BUCKET_NAME) {
+    throw new Error('S3_BUCKET_NAME is not configured')
+  }
+  const command = new GetObjectCommand({
+    Bucket: S3_BUCKET_NAME,
+    Key: key,
   })
   return getSignedUrl(s3, command, { expiresIn })
 }

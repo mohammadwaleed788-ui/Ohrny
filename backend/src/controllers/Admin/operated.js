@@ -5,6 +5,7 @@ import { messages } from '../../../db/schema/messaging.js'
 import { userDiscoverPreferences, userPrivacySettings } from '../../../db/schema/settings.js'
 import { userInterests, userLifestyle, userPhotos, userPrompts, users } from '../../../db/schema/users.js'
 import { signAccessTokenUser } from '../../utils/jwt.js'
+import { generateSignedReadUrl } from '../../utils/s3.js'
 
 const HANDLE_PREFIX = 'optest_'
 const PHONE_PREFIX = '555019'
@@ -125,11 +126,23 @@ async function loadPersona(userId) {
     db.select().from(userInterests).where(eq(userInterests.userId, userId)).orderBy(asc(userInterests.position)),
   ])
 
+  const photosWithUrl = await Promise.all(
+    photos.map(async (photo) => {
+      if (!photo?.storageKey) return photo
+      try {
+        const url = await generateSignedReadUrl(photo.storageKey)
+        return { ...photo, url }
+      } catch {
+        return { ...photo, url: null }
+      }
+    }),
+  )
+
   return mapPersona(row, {
     lifestyle,
     preferences: prefs,
     privacy,
-    photos,
+    photos: photosWithUrl,
     prompts,
     interests: interests.map((item) => item.interest),
     height: lifestyle?.height || '',
@@ -186,11 +199,11 @@ async function nextOperatedPhone() {
   throw new Error('No operated phone numbers available')
 }
 
-async function uniqueHandle(baseHandle) {
+async function uniqueHandle(baseHandle, excludeUserId = null) {
   let handle = baseHandle
   for (let index = 1; index < 1000; index += 1) {
     const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.handle, handle)).limit(1)
-    if (!existing) return handle
+    if (!existing || existing.id === excludeUserId) return handle
     handle = `${baseHandle.slice(0, 20)}_${index}`
   }
   throw new Error('No operated handle available')
@@ -340,6 +353,10 @@ export async function updatePersona(req, res) {
 
     const body = req.body || {}
     const userUpdates = {}
+    if (body.name !== undefined || body.handle !== undefined) {
+      const nextBaseHandle = slugHandle(body.handle || body.name)
+      userUpdates.handle = await uniqueHandle(nextBaseHandle, existing.id)
+    }
     if (body.bio !== undefined) userUpdates.bio = body.bio ? String(body.bio).slice(0, 500) : null
     if (body.work !== undefined) userUpdates.work = body.work ? String(body.work).slice(0, 120) : null
     if (body.gender !== undefined || body.iam !== undefined) userUpdates.iam = normalizeIam(body.gender || body.iam)

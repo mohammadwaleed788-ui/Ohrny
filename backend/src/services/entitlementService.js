@@ -41,7 +41,7 @@ export const DEFAULT_PLAN_CONFIGS = {
   plus: {
     id: 'plus',
     name: 'Ohrny Plus',
-    priceMonthly: '9.99',
+    priceMonthly: null,
     currency: 'EUR',
     swipesPerDay: null,
     maxChats: null,
@@ -64,7 +64,7 @@ export const DEFAULT_PLAN_CONFIGS = {
   platin: {
     id: 'platin',
     name: 'Ohrny Platin',
-    priceMonthly: '24.99',
+    priceMonthly: null,
     currency: 'EUR',
     swipesPerDay: null,
     maxChats: null,
@@ -87,7 +87,7 @@ export const DEFAULT_PLAN_CONFIGS = {
   private: {
     id: 'private',
     name: 'Ohrny Private',
-    priceMonthly: '79.00',
+    priceMonthly: null,
     currency: 'EUR',
     swipesPerDay: null,
     maxChats: null,
