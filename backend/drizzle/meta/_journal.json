@@ -50,6 +50,13 @@
       "when": 1779706764490,
       "tag": "0006_lonely_electro",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780650021538,
+      "tag": "0007_open_sebastian_shaw",
+      "breakpoints": true
     }
   ]
 }

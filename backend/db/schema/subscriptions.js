@@ -5,7 +5,7 @@ import {
 import { relations } from 'drizzle-orm';
 import { users } from './users.js';
 import {
-  planEnum, subscriptionStatusEnum, platformEnum, purchaseTypeEnum,
+  planEnum, subscriptionStatusEnum, platformEnum, purchaseTypeEnum, subscriptionDurationEnum,
 } from './enums.js';
 
 // ─── subscription_plans ───────────────────────────────────────────────────────
@@ -46,16 +46,48 @@ export const subscriptionPlans = pgTable('subscription_plans', {
   updatedAt:            timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ─── subscription_plan_products ──────────────────────────────────────────────
+// Sellable SKUs per plan tier, platform, and duration.
+export const subscriptionPlanProducts = pgTable('subscription_plan_products', {
+  id:                   uuid('id').primaryKey().defaultRandom(),
+  planId:               varchar('plan_id', { length: 20 }).notNull().references(() => subscriptionPlans.id, { onDelete: 'cascade' }),
+  platform:             platformEnum('platform').notNull(),
+  duration:             subscriptionDurationEnum('duration').notNull(),
+  revenueCatProductId:  varchar('revenue_cat_product_id', { length: 120 }).notNull().unique(),
+
+  currency:             varchar('currency', { length: 4 }).notNull().default('EUR'),
+  totalPrice:           numeric('total_price', { precision: 8, scale: 2 }).notNull(),
+  weeklyPrice:          numeric('weekly_price', { precision: 8, scale: 2 }).notNull(),
+  compareAtWeeklyPrice: numeric('compare_at_weekly_price', { precision: 8, scale: 2 }),
+  discountPercent:      smallint('discount_percent'),
+
+  isActive:             boolean('is_active').notNull().default(true),
+  isDefault:            boolean('is_default').notNull().default(false),
+  sortOrder:            smallint('sort_order').notNull().default(0),
+
+  startsAt:             timestamp('starts_at', { withTimezone: true }),
+  endsAt:               timestamp('ends_at', { withTimezone: true }),
+
+  createdAt:            timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:            timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  planPlatformDurationIdx: index('subscription_plan_products_ppd_idx').on(t.planId, t.platform, t.duration),
+  activeIdx: index('subscription_plan_products_active_idx').on(t.isActive, t.sortOrder),
+}));
+
 // ─── user_subscriptions ───────────────────────────────────────────────────────
 // One active row per user (status = 'active'). Historical rows kept for billing.
 export const userSubscriptions = pgTable('user_subscriptions', {
   id:                     uuid('id').primaryKey().defaultRandom(),
   userId:                 uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   planId:                 varchar('plan_id', { length: 20 }).notNull().references(() => subscriptionPlans.id),
+  productId:              uuid('product_id').references(() => subscriptionPlanProducts.id, { onDelete: 'set null' }),
 
+  revenueCatProductId:      varchar('revenue_cat_product_id',    { length: 120 }),
   revenueCatPurchaseToken:  varchar('revenue_cat_purchase_token',  { length: 512 }),
   revenueCatEntitlementId:  varchar('revenue_cat_entitlement_id',  { length: 120 }),
   revenueCatTransactionId:  varchar('revenue_cat_transaction_id',  { length: 120 }),
+  duration:               subscriptionDurationEnum('duration'),
 
   status:                 subscriptionStatusEnum('status').notNull().default('pending'),
   platform:               platformEnum('platform').notNull(),
@@ -120,11 +152,18 @@ export const userBoosts = pgTable('user_boosts', {
 // ─── Relations ────────────────────────────────────────────────────────────────
 export const subscriptionPlansRelations = relations(subscriptionPlans, ({ many }) => ({
   userSubscriptions: many(userSubscriptions),
+  products: many(subscriptionPlanProducts),
 }));
 
 export const userSubscriptionsRelations = relations(userSubscriptions, ({ one }) => ({
   user: one(users, { fields: [userSubscriptions.userId], references: [users.id] }),
   plan: one(subscriptionPlans, { fields: [userSubscriptions.planId], references: [subscriptionPlans.id] }),
+  product: one(subscriptionPlanProducts, { fields: [userSubscriptions.productId], references: [subscriptionPlanProducts.id] }),
+}));
+
+export const subscriptionPlanProductsRelations = relations(subscriptionPlanProducts, ({ one, many }) => ({
+  plan: one(subscriptionPlans, { fields: [subscriptionPlanProducts.planId], references: [subscriptionPlans.id] }),
+  subscriptions: many(userSubscriptions),
 }));
 
 export const inAppPurchasesRelations = relations(inAppPurchases, ({ one }) => ({

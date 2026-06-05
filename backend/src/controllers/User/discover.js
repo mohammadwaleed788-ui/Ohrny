@@ -1,11 +1,13 @@
 import { sql, inArray, and, isNull, asc, desc, eq } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { users, userPhotos, userPrompts, userInterests, userLifestyle } from '../../../db/schema/users.js'
-import { userDiscoverPreferences } from '../../../db/schema/settings.js'
+import { userDiscoverPreferences, userPrivacySettings } from '../../../db/schema/settings.js'
 import { likes, matches } from '../../../db/schema/matching.js'
 import { blocks } from '../../../db/schema/safety.js'
+import { userBoosts } from '../../../db/schema/subscriptions.js'
 import { notifyNewLike, notifyNewMatch } from '../../services/notifications/likeNotification.js'
 import { attachUsersToMatchRoom } from '../../socket/index.js'
+import { assertCanSwipe, consumeSwipe, getEffectiveEntitlements } from '../../services/entitlementService.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -83,21 +85,32 @@ export async function getDiscoverCards(req, res) {
       return res.status(404).json({ error: 'User not found' })
     }
 
-    const prefsRows = await db
+    const [prefsRows, entitlements] = await Promise.all([
+      db
       .select({
         maxDistance: userDiscoverPreferences.maxDistance,
         minDistance: userDiscoverPreferences.minDistance,
         ageMin: userDiscoverPreferences.ageMin,
         ageMax: userDiscoverPreferences.ageMax,
         relationshipType: userDiscoverPreferences.relationshipType,
+        verifiedOnly: userDiscoverPreferences.verifiedOnly,
+        advancedCompatibility: userDiscoverPreferences.advancedCompatibility,
+        travelMode: userDiscoverPreferences.travelMode,
         globalMode: userDiscoverPreferences.globalMode,
       })
       .from(userDiscoverPreferences)
       .where(sql`${userDiscoverPreferences.userId} = ${req.user.id}`)
-      .limit(1)
+      .limit(1),
+      getEffectiveEntitlements(req.user.id),
+    ])
 
     const prefs = prefsRows[0] || {}
-    const globalMode = Boolean(prefs.globalMode)
+    const globalMode = Boolean(prefs.globalMode && entitlements?.features.globalMode)
+    const travelMode = Boolean(prefs.travelMode && entitlements?.features.travelMode)
+    const advancedCompatibility = Boolean(
+      prefs.advancedCompatibility && entitlements?.features.advancedCompatibility,
+    )
+    const verifiedOnly = Boolean(prefs.verifiedOnly && entitlements?.features.verifiedOnly)
     const maxDistance = clampInt(prefs.maxDistance, 1, 200, 25)
     const minDistance = clampInt(prefs.minDistance, 0, 100, 0)
     const ageMin = clampInt(prefs.ageMin, 18, 99, 18)
@@ -123,8 +136,8 @@ export async function getDiscoverCards(req, res) {
       )
     )`
     const distanceMilesSql = sql`(${distanceMetersSql} / 1609.344)`
-    const minMeters = safeMinDistance * 1609.344
-    const maxMeters = maxDistance * 1609.344
+    const minMeters = (travelMode ? 0 : safeMinDistance) * 1609.344
+    const maxMeters = (travelMode ? Math.max(maxDistance, 500) : maxDistance) * 1609.344
 
     // Base conditions shared by both the main query and the exhausted check.
     // Does NOT include swipe-history exclusion or cursor so we can reuse it.
@@ -136,7 +149,18 @@ export async function getDiscoverCards(req, res) {
       sql`${users.age} >= ${safeAgeMin}`,
       sql`${users.age} <= ${safeAgeMax}`,
       inArray(users.relationshipGoal, relationshipTargets),
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${userPrivacySettings} ups
+        WHERE ups.user_id = ${users.id}
+          AND ups.incognito_mode = true
+      )`,
     ]
+    if (verifiedOnly) {
+      baseWhereParts.push(eq(users.idVerified, true))
+    }
+    if (advancedCompatibility) {
+      baseWhereParts.push(sql`coalesce(${users.profileCompletePct}, 0) >= 40`)
+    }
 
     if (!globalMode) {
       baseWhereParts.push(
@@ -199,9 +223,29 @@ export async function getDiscoverCards(req, res) {
 
     // ── Step 1: fetch the user rows (no subqueries) ──────────────────────────
     const distanceSelectSql = globalMode ? sql`null` : distanceMilesSql
+    const boostedOrderSql = sql`(
+      CASE WHEN EXISTS (
+        SELECT 1 FROM ${userBoosts} ub
+        WHERE ub.user_id = ${users.id}
+          AND ub.is_active = true
+          AND ub.expires_at > now()
+      ) THEN 0 ELSE 1 END
+    )`
+    const compatibilityOrderSql = sql`(
+      CASE
+        WHEN ${advancedCompatibility} THEN (
+          CASE
+            WHEN ${users.relationshipGoal} = ${prefs.relationshipType || 'dating'} THEN 0
+            WHEN ${users.idVerified} = true THEN 1
+            ELSE 2
+          END
+        )
+        ELSE 0
+      END
+    )`
     const orderByClause = globalMode
-      ? [asc(users.id)]
-      : [sql`${distanceMilesSql} asc`, asc(users.id)]
+      ? [asc(boostedOrderSql), asc(compatibilityOrderSql), asc(users.id)]
+      : [asc(boostedOrderSql), asc(compatibilityOrderSql), sql`${distanceMilesSql} asc`, asc(users.id)]
 
     const rows = await db
       .select({
@@ -384,26 +428,44 @@ export async function swipeDiscoverCard(req, res) {
     //   return res.status(403).json({ error: 'Interaction not allowed' })
     // }
 
+    const [existingSwipe] = await db
+      .select({ id: likes.id, type: likes.type })
+      .from(likes)
+      .where(and(eq(likes.fromUserId, fromUserId), eq(likes.toUserId, toUserId)))
+      .limit(1)
+
+    const shouldConsumeSwipe = !existingSwipe
+    const shouldConsumeSuperLike = type === 'super_like' && existingSwipe?.type !== 'super_like'
+    if (shouldConsumeSwipe || shouldConsumeSuperLike) {
+      const access = await assertCanSwipe(fromUserId, type)
+      if (!access.ok) return res.status(access.status).json(access.body)
+    }
+
     const now = new Date()
-    await db
-      .insert(likes)
-      .values({
-        fromUserId,
-        toUserId,
-        type,
-        matchId: null,
-        seenAt: type === 'pass' ? now : null,
-        createdAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [likes.fromUserId, likes.toUserId],
-        set: {
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(likes)
+        .values({
+          fromUserId,
+          toUserId,
           type,
           matchId: null,
           seenAt: type === 'pass' ? now : null,
           createdAt: now,
-        },
-      })
+        })
+        .onConflictDoUpdate({
+          target: [likes.fromUserId, likes.toUserId],
+          set: {
+            type,
+            matchId: null,
+            seenAt: type === 'pass' ? now : null,
+            createdAt: now,
+          },
+        })
+      if (shouldConsumeSwipe || shouldConsumeSuperLike) {
+        await consumeSwipe(fromUserId, shouldConsumeSuperLike ? type : 'like', tx, { countSwipe: shouldConsumeSwipe })
+      }
+    })
 
     if (type === 'pass') {
       return res.json({ ok: true, swipeType: type, matched: false })

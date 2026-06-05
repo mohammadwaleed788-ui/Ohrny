@@ -1,14 +1,13 @@
 import { Server } from 'socket.io'
-import { and, eq, isNull, or, sql } from 'drizzle-orm'
+import { and, eq, or } from 'drizzle-orm'
 import { socketAuthMiddleware } from './auth.js'
 import { db } from '../../db/index.js'
 import { matches } from '../../db/schema/matching.js'
 import { calls, messages } from '../../db/schema/messaging.js'
-import { users } from '../../db/schema/users.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../services/notifications/chatNotification.js'
+import { assertCanMessage, assertFeature, getEffectiveEntitlements } from '../services/entitlementService.js'
 
 let io = null
-const FREE_MESSAGE_LIMIT = 10
 
 export function getIO() {
   return io
@@ -188,34 +187,12 @@ export function initSocket(server) {
 
         const recipientId = isUserA ? match.userBId : match.userAId
 
-        // Free-tier gating
-        const [sender] = await db
-          .select({ plan: users.plan, iam: users.iam })
-          .from(users)
-          .where(eq(users.id, userId))
-          .limit(1)
-
-        const isWoman = sender?.iam === 'woman'
-        const isFree = !sender || sender.plan === 'free'
-        const myMsgCount = await getVisibleSentMessageCount(matchId, userId)
-
-        // Women have unlimited messaging regardless of plan
-        if (isFree && !isWoman) {
-          if (myMsgCount >= FREE_MESSAGE_LIMIT) {
-            return ack?.({ error: 'message_limit', paywall: 'messages' })
-          }
-
-          if (myMsgCount === 0) {
-            const { startedCount } = await getStartedChatCount(userId)
-            if (startedCount >= 4) {
-              return ack?.({ error: 'chat_limit', paywall: 'matches' })
-            }
-          }
-        }
+        const access = await assertCanMessage(userId, matchId)
+        if (!access.ok) return ack?.(access.body)
 
         const now = new Date()
-        // Ephemeral only for Plus users; free users get permanent messages
-        const isEphemeral = !isFree
+        const entitlements = access.entitlements || await getEffectiveEntitlements(userId)
+        const isEphemeral = entitlements?.plan !== 'free'
         const expiresAt = isEphemeral
           ? new Date(now.getTime() + 24 * 60 * 60 * 1000)
           : null
@@ -232,7 +209,9 @@ export function initSocket(server) {
           })
           .returning()
 
-        const countField = isUserA ? { messageCountUserA: myMsgCount + 1 } : { messageCountUserB: myMsgCount + 1 }
+        const countField = isUserA
+          ? { messageCountUserA: access.myMessageCount + 1 }
+          : { messageCountUserB: access.myMessageCount + 1 }
         await db
           .update(matches)
           .set({ ...countField, updatedAt: now })
@@ -302,7 +281,10 @@ export function initSocket(server) {
             ),
           )
 
-        io.to(`match:${matchId}`).emit('message:read', { matchId, readBy: userId })
+        const senderAccess = await assertFeature(partnerId, 'readReceipts')
+        if (senderAccess.ok) {
+          io.to(`user:${partnerId}`).emit('message:read', { matchId, readBy: userId })
+        }
         ack?.({ ok: true })
       } catch (err) {
         console.error('message:read error:', err.message)
@@ -426,28 +408,4 @@ export function initSocket(server) {
   })
 
   return io
-}
-
-async function getStartedChatCount(userId) {
-  const rows = await db
-    .selectDistinct({ matchId: messages.matchId })
-    .from(messages)
-    .where(eq(messages.senderId, userId))
-
-  return { startedCount: rows.length }
-}
-
-async function getVisibleSentMessageCount(matchId, userId) {
-  const [row] = await db
-    .select({ count: sql`count(*)::int` })
-    .from(messages)
-    .where(
-      and(
-        eq(messages.matchId, matchId),
-        eq(messages.senderId, userId),
-        isNull(messages.deletedAt),
-      ),
-    )
-
-  return Number(row?.count || 0)
 }

@@ -23,6 +23,7 @@ import {
 import { normalizePhoneE164 } from '../../utils/phone.js'
 import { resolveOtpProvider, sendOtpWithProvider, verifyOtpWithProvider } from '../../services/otp/provider.js'
 import { getIO } from '../../socket/index.js'
+import { assertFeature } from '../../services/entitlementService.js'
 
 async function loadUserDetails(userId) {
   const [account] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
@@ -482,7 +483,7 @@ export async function completeOnboarding(req, res) {
         anonymousHandle: privacySafe.anon !== false,
         ephemeralMessages: privacySafe.ephem !== false,
         screenshotShield: privacySafe.screenshot !== false,
-        incognitoMode: Boolean(privacySafe.incognito),
+        incognitoMode: false,
       })
 
       await tx.insert(userDiscoverPreferences).values({
@@ -724,7 +725,13 @@ export async function updatePrivacy(req, res) {
     if (anonymousHandle !== undefined) updates.anonymousHandle = Boolean(anonymousHandle)
     if (ephemeralMessages !== undefined) updates.ephemeralMessages = Boolean(ephemeralMessages)
     if (screenshotShield !== undefined) updates.screenshotShield = Boolean(screenshotShield)
-    if (incognitoMode !== undefined) updates.incognitoMode = Boolean(incognitoMode)
+    if (incognitoMode !== undefined) {
+      if (Boolean(incognitoMode)) {
+        const access = await assertFeature(userId, 'incognitoMode')
+        if (!access.ok) return res.status(access.status).json(access.body)
+      }
+      updates.incognitoMode = Boolean(incognitoMode)
+    }
     if (analyticsConsent !== undefined) updates.analyticsConsent = Boolean(analyticsConsent)
     if (personalizationConsent !== undefined) updates.personalizationConsent = Boolean(personalizationConsent)
     if (marketingEmails !== undefined) updates.marketingEmails = Boolean(marketingEmails)
@@ -755,6 +762,9 @@ export async function updatePreferences(req, res) {
       ageMax,
       relationshipType,
       photoBlurVisibility,
+      verifiedOnly,
+      advancedCompatibility,
+      travelMode,
       globalMode,
     } = req.body || {}
 
@@ -779,8 +789,19 @@ export async function updatePreferences(req, res) {
     if (photoBlurVisibility !== undefined && !Number.isNaN(Number(photoBlurVisibility))) {
       prefUpdates.photoBlurVisibility = Math.max(0, Math.min(100, Math.round(Number(photoBlurVisibility))))
     }
-    if (globalMode !== undefined) {
-      prefUpdates.globalMode = Boolean(globalMode)
+    const paidFilters = {
+      verifiedOnly: { value: verifiedOnly, feature: 'verifiedOnly' },
+      advancedCompatibility: { value: advancedCompatibility, feature: 'advancedCompatibility' },
+      travelMode: { value: travelMode, feature: 'travelMode' },
+      globalMode: { value: globalMode, feature: 'globalMode' },
+    }
+    for (const [field, config] of Object.entries(paidFilters)) {
+      if (config.value === undefined) continue
+      if (Boolean(config.value)) {
+        const access = await assertFeature(userId, config.feature)
+        if (!access.ok) return res.status(access.status).json(access.body)
+      }
+      prefUpdates[field] = Boolean(config.value)
     }
 
     await db.transaction(async (tx) => {

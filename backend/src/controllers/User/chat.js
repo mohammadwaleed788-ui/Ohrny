@@ -7,10 +7,10 @@ import { userPrivacySettings } from '../../../db/schema/settings.js'
 import { blocks } from '../../../db/schema/safety.js'
 import { attachUsersToMatchRoom, getIO, isUserReadingMatch } from '../../socket/index.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../../services/notifications/chatNotification.js'
+import { assertCanMessage, assertFeature } from '../../services/entitlementService.js'
 
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 50
-const FREE_MESSAGE_LIMIT = 10
 
 function clampInt(value, min, max, fallback) {
   const n = Number(value)
@@ -238,12 +238,19 @@ export async function getMessages(req, res) {
     const sliced = hasMore ? rows.slice(0, limit) : rows
     const last = sliced[sliced.length - 1]
     const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null
+    const readReceiptAccess = await assertFeature(userId, 'readReceipts')
+    const canSeeReadReceipts = readReceiptAccess.ok
 
     return res.json({
-      messages: sliced.map((m) => ({
-        ...m,
-        fromMe: m.senderId === userId,
-      })),
+      messages: sliced.map((m) => {
+        const fromMe = m.senderId === userId
+        return {
+          ...m,
+          fromMe,
+          isRead: fromMe && !canSeeReadReceipts ? false : m.isRead,
+          readAt: fromMe && !canSeeReadReceipts ? null : m.readAt,
+        }
+      }),
       nextCursor,
       hasMore,
     })
@@ -292,28 +299,9 @@ export async function sendMessage(req, res) {
         .json({ error: 'recipient_paused', message: 'This person has paused their account.' })
     }
 
-    // Free-tier gating
-    const [sender] = await db
-      .select({ plan: users.plan })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1)
-
-    const isFree = !sender || sender.plan === 'free'
-    const myMsgCount = await getVisibleSentMessageCount(matchId, userId)
-
-    if (isFree) {
-      if (myMsgCount >= FREE_MESSAGE_LIMIT) {
-        return res.status(403).json({ error: 'message_limit', paywall: 'messages' })
-      }
-
-      if (myMsgCount === 0) {
-        const startedCount = await getStartedChatCount(userId)
-        if (startedCount >= 4) {
-          return res.status(403).json({ error: 'chat_limit', paywall: 'matches' })
-        }
-      }
-    }
+    const access = await assertCanMessage(userId, matchId)
+    if (!access.ok) return res.status(access.status).json(access.body)
+    const myMsgCount = access.myMessageCount
 
     const now = new Date()
     const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
@@ -403,7 +391,10 @@ export async function markRead(req, res) {
 
     const io = getIO()
     if (io) {
-      io.to(`match:${matchId}`).emit('message:read', { matchId, readBy: userId })
+      const senderAccess = await assertFeature(partnerId, 'readReceipts')
+      if (senderAccess.ok) {
+        io.to(`user:${partnerId}`).emit('message:read', { matchId, readBy: userId })
+      }
     }
 
     return res.json({ ok: true })
@@ -805,11 +796,3 @@ export async function getPartnerProfile(req, res) {
   }
 }
 
-async function getStartedChatCount(userId) {
-  const rows = await db
-    .selectDistinct({ matchId: messages.matchId })
-    .from(messages)
-    .where(eq(messages.senderId, userId))
-
-  return rows.length
-}

@@ -3,9 +3,9 @@ import { db } from '../../../db/index.js'
 import { likes, matches } from '../../../db/schema/matching.js'
 import { users, userPhotos } from '../../../db/schema/users.js'
 import { blocks } from '../../../db/schema/safety.js'
-import { subscriptionPlans, userSubscriptions } from '../../../db/schema/subscriptions.js'
 import { notifyNewMatch, notifyPassed } from '../../services/notifications/likeNotification.js'
 import { attachUsersToMatchRoom } from '../../socket/index.js'
+import { assertFeature } from '../../services/entitlementService.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -63,23 +63,6 @@ function sortPair(user1, user2) {
     : { userAId: user2, userBId: user1 }
 }
 
-async function canSeeLikes(userId) {
-  const [sub] = await db
-    .select({ canSeeLikes: subscriptionPlans.canSeeLikes })
-    .from(userSubscriptions)
-    .innerJoin(subscriptionPlans, eq(userSubscriptions.planId, subscriptionPlans.id))
-    .where(
-      and(
-        eq(userSubscriptions.userId, userId),
-        eq(userSubscriptions.status, 'active'),
-        eq(subscriptionPlans.isActive, true),
-      ),
-    )
-    .orderBy(desc(userSubscriptions.createdAt))
-    .limit(1)
-  return Boolean(sub?.canSeeLikes)
-}
-
 async function findVisibleInboundLike(userId, fromUserId) {
   const rows = await db
     .select({
@@ -123,8 +106,9 @@ export async function getReceivedLikes(req, res) {
     const userId = req.user.id
     const limit = clampInt(req.query.limit, 1, MAX_LIMIT, DEFAULT_LIMIT)
     const cursor = decodeCursor(req.query.cursor)
-    // Paywall bypassed until subscriptions go live — always show full data.
-    const unlocked = true // await canSeeLikes(userId)
+    const access = await assertFeature(userId, 'canSeeLikes')
+    if (!access.ok && access.status !== 403) return res.status(access.status).json(access.body)
+    const unlocked = access.ok
 
     const whereParts = [
       eq(likes.toUserId, userId),
@@ -288,6 +272,9 @@ export async function getReceivedLikes(req, res) {
 export async function passLiker(req, res) {
   try {
     const userId = req.user.id
+    const access = await assertFeature(userId, 'canSeeLikes')
+    if (!access.ok) return res.status(access.status).json(access.body)
+
     const fromUserId = req.params.fromUserId
     if (!fromUserId) return res.status(400).json({ error: 'Invalid user' })
 
@@ -485,6 +472,9 @@ export async function unlikeUser(req, res) {
 export async function likeBack(req, res) {
   try {
     const userId = req.user.id
+    const access = await assertFeature(userId, 'canSeeLikes')
+    if (!access.ok) return res.status(access.status).json(access.body)
+
     const fromUserId = req.params.fromUserId
     if (!fromUserId) return res.status(400).json({ error: 'Invalid user' })
     if (fromUserId === userId) return res.status(400).json({ error: 'Cannot like yourself' })

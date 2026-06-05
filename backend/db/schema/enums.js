@@ -58,6 +58,10 @@ export const platformEnum = pgEnum('platform_type', [
   'ios', 'android', 'web',
 ]);
 
+export const subscriptionDurationEnum = pgEnum('subscription_duration', [
+  '1w', '1m', '3m', '6m',
+]);
+
 export const purchaseTypeEnum = pgEnum('purchase_type', [
   'super_likes', 'boosts',
 ]);

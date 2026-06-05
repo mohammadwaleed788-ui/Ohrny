@@ -14,10 +14,14 @@ import memberLikesRoutes from './User/likes.js'
 import memberChatRoutes from './User/chat.js'
 import memberActivityRoutes from './User/activity.js'
 import memberSafetyRoutes from './User/safety.js'
+import memberEntitlementRoutes from './User/entitlements.js'
+import memberBoostRoutes from './User/boosts.js'
+import revenueCatRoutes from './Shared/revenuecat.js'
 
 const router = Router()
 
 router.use(healthRoute)
+router.use(revenueCatRoutes)
 router.use('/admin', staffAuthRoutes)
 router.use('/admin', adminOverviewRoutes)
 router.use('/admin', adminMatchesRoutes)
@@ -30,6 +34,8 @@ router.use('/user', memberLikesRoutes)
 router.use('/user', memberChatRoutes)
 router.use('/user', memberActivityRoutes)
 router.use('/user', memberSafetyRoutes)
+router.use('/user', memberEntitlementRoutes)
+router.use('/user', memberBoostRoutes)
 router.use('/user/devices', memberDeviceRoutes)
 router.use('/user/photos', memberPhotoRoutes)
 
