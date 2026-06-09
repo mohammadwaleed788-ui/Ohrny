@@ -75,10 +75,24 @@ function isReviewPhone(phoneE164) {
   return REVIEW_PHONES.includes(phoneE164)
 }
 
+// Normalize a phone for OTP. Real numbers go through strict validation; an
+// allowlisted REVIEW_PHONES number is accepted as-is even if it isn't a real,
+// dialable number (so reviewers/testers can use a fixed test number).
+function resolvePhone(phoneCountry, phone) {
+  const normalized = normalizePhoneE164(phoneCountry, phone)
+  if (normalized) return normalized
+  const country = String(phoneCountry || '+1').trim()
+  const withPlus = country.startsWith('+') ? country : `+${country}`
+  const digits = String(phone || '').replace(/\D/g, '')
+  if (!digits) return null
+  const candidate = { phoneE164: `${withPlus}${digits}`, phoneCountry: withPlus, phone: digits }
+  return isReviewPhone(candidate.phoneE164) ? candidate : null
+}
+
 export async function sendOtp(req, res) {
   try {
     const { phone, phoneCountry, flow } = req.body || {}
-    const normalized = normalizePhoneE164(phoneCountry, phone)
+    const normalized = resolvePhone(phoneCountry, phone)
     if (!normalized) {
       return res.status(400).json({ error: 'Invalid phone number' })
     }
@@ -217,7 +231,7 @@ export async function checkHandle(req, res) {
 export async function verifyOtp(req, res) {
   try {
     const { phone, phoneCountry, code } = req.body || {}
-    const normalized = normalizePhoneE164(phoneCountry, phone)
+    const normalized = resolvePhone(phoneCountry, phone)
     if (!normalized) {
       return res.status(400).json({ error: 'Invalid phone number' })
     }
