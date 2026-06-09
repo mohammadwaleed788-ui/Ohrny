@@ -10,13 +10,15 @@ import {
   syncUserPlanCache,
 } from '../../services/entitlementService.js'
 
+// Ordered LARGEST-first: `super.*5` also matches "15"/"30", so the bigger,
+// more-specific packs must be tested before the smaller ones.
 const PURCHASE_PACKS = [
-  { match: /super.*5|5.*super/i, type: 'super_likes', quantity: 5 },
-  { match: /super.*15|15.*super/i, type: 'super_likes', quantity: 15 },
   { match: /super.*30|30.*super/i, type: 'super_likes', quantity: 30 },
-  { match: /boost.*1|1.*boost/i, type: 'boosts', quantity: 1 },
-  { match: /boost.*5|5.*boost/i, type: 'boosts', quantity: 5 },
+  { match: /super.*15|15.*super/i, type: 'super_likes', quantity: 15 },
+  { match: /super.*5|5.*super/i, type: 'super_likes', quantity: 5 },
   { match: /boost.*10|10.*boost/i, type: 'boosts', quantity: 10 },
+  { match: /boost.*5|5.*boost/i, type: 'boosts', quantity: 5 },
+  { match: /boost.*1|1.*boost/i, type: 'boosts', quantity: 1 },
 ]
 
 function eventFromPayload(payload) {

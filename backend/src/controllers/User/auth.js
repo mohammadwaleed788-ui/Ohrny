@@ -61,6 +61,20 @@ async function issueTokens(accountId) {
   return { accessToken, refreshToken, user: account }
 }
 
+// Store-review / test bypass: phone numbers listed in REVIEW_PHONES (comma-
+// separated E.164, e.g. "+15550000123,+923137426256") skip the real SMS and
+// accept the fixed REVIEW_OTP code. This lets App Store / Play reviewers — who
+// can't receive our SMS — sign in. Empty by default (bypass off in prod unless
+// configured).
+const REVIEW_OTP = process.env.REVIEW_OTP || '000000'
+const REVIEW_PHONES = (process.env.REVIEW_PHONES || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+function isReviewPhone(phoneE164) {
+  return REVIEW_PHONES.includes(phoneE164)
+}
+
 export async function sendOtp(req, res) {
   try {
     const { phone, phoneCountry, flow } = req.body || {}
@@ -111,7 +125,11 @@ export async function sendOtp(req, res) {
         ),
       )
 
-    if (provider === 'twilio') {
+    if (isReviewPhone(phoneE164)) {
+      // Review/test number: no real SMS — store the fixed OTP hash so verifyOtp
+      // accepts REVIEW_OTP regardless of the SMS provider.
+      codeHash = await bcrypt.hash(REVIEW_OTP, 10)
+    } else if (provider === 'twilio') {
       await sendOtpWithProvider(provider, phoneE164)
     } else {
       const code = String(Math.floor(100000 + Math.random() * 900000))
@@ -245,7 +263,17 @@ export async function verifyOtp(req, res) {
       return res.status(429).json({ error: 'Too many attempts' })
     }
 
-    if (provider === 'twilio') {
+    if (isReviewPhone(phoneE164)) {
+      // Review/test number: match against the fixed OTP hash stored by sendOtp.
+      const match = await bcrypt.compare(String(code).trim(), row.codeHash)
+      if (!match) {
+        await db
+          .update(phoneVerifications)
+          .set({ attempts: row.attempts + 1 })
+          .where(eq(phoneVerifications.id, row.id))
+        return res.status(401).json({ error: 'Invalid code' })
+      }
+    } else if (provider === 'twilio') {
       try {
         await verifyOtpWithProvider(provider, phoneE164, String(code).trim())
       } catch (error) {
