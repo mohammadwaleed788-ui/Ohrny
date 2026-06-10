@@ -269,21 +269,22 @@ export async function getDiscoverCards(req, res) {
           AND ub.expires_at > now()
       ) THEN 0 ELSE 1 END
     )`
+    // Cast the enum to text: `relationshipType` is a UI preference value
+    // (e.g. "open") that isn't necessarily a valid relationship_goal enum
+    // member, so comparing it to the enum column directly throws 22P02.
     const compatibilityOrderSql = sql`(
       CASE
-        WHEN ${advancedCompatibility} THEN (
-          CASE
-            WHEN ${users.relationshipGoal} = ${prefs.relationshipType || 'dating'} THEN 0
-            WHEN ${users.idVerified} = true THEN 1
-            ELSE 2
-          END
-        )
-        ELSE 0
+        WHEN ${users.relationshipGoal}::text = ${prefs.relationshipType || 'dating'} THEN 0
+        WHEN ${users.idVerified} = true THEN 1
+        ELSE 2
       END
     )`
-    const orderByClause = !distanceMode
-      ? [asc(boostedOrderSql), asc(compatibilityOrderSql), asc(users.id)]
-      : [asc(boostedOrderSql), asc(compatibilityOrderSql), sql`${distanceMilesSql} asc`, asc(users.id)]
+    // Build the sort list simply: boosted first, then (only if the premium
+    // feature is on) compatibility, then distance (local mode), then id.
+    const orderByClause = [asc(boostedOrderSql)]
+    if (advancedCompatibility) orderByClause.push(asc(compatibilityOrderSql))
+    if (distanceMode) orderByClause.push(sql`${distanceMilesSql} asc`)
+    orderByClause.push(asc(users.id))
 
     const rows = await db
       .select({
