@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Search, Download, Filter, ChevronLeft, ChevronRight, X, MoreHorizontal } from 'lucide-react'
 import { PageHead } from '../components/PageHead'
 import { adminTokens } from '../theme/tokens'
-import { apiGet } from '../../services/apiClient'
+import { apiGet, apiPost } from '../../services/apiClient'
 
 const STATUS_CHIP = {
   active: { cls: 'bg-emerald-500/20 text-emerald-300', label: 'Active' },
@@ -15,6 +15,8 @@ const STATUS_CHIP = {
 const PLAN_CHIP = {
   platinum: { cls: 'bg-violet-500/20 text-violet-300', label: 'Platinum' },
   gold: { cls: 'bg-amber-500/20 text-amber-300', label: 'Gold' },
+  plus: { cls: 'bg-amber-500/20 text-amber-300', label: 'Plus' },
+  platin: { cls: 'bg-violet-500/20 text-violet-300', label: 'Platin' },
   free: { cls: `${adminTokens.bgElev2} ${adminTokens.textDim}`, label: 'Free' },
 }
 
@@ -34,6 +36,28 @@ const SORT_OPTIONS = [
   ['most_reports', 'Most reports'],
 ]
 
+const SUBSCRIPTION_PRESETS = [
+  ['20m', '20 minutes (quick test)'],
+  ['1d', '1 day'],
+  ['7d', '7 days'],
+  ['30d', '30 days'],
+  ['365d', '365 days'],
+  ['perpetual', 'Perpetual (no expiry)'],
+]
+
+function formatDateTime(value) {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 function Avatar({ name, hue, size = 32 }) {
   const letters = (name || '?').split(/[\s@_]+/).filter(Boolean).map(s => s[0]).slice(0, 2).join('').toUpperCase()
   return (
@@ -49,20 +73,100 @@ function Avatar({ name, hue, size = 32 }) {
   )
 }
 
-function UserDrawer({ userId, onClose }) {
+function UserDrawer({ userId, onClose, onUserUpdated }) {
   const [user, setUser] = useState(null)
+  const [subscription, setSubscription] = useState(null)
   const [tab, setTab] = useState('profile')
   const [loading, setLoading] = useState(true)
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const [actionSuccess, setActionSuccess] = useState('')
+  const [subForm, setSubForm] = useState({
+    planId: 'plus',
+    duration: '1m',
+    platform: 'ios',
+    expiryPreset: '365d',
+  })
+  const [purchaseForm, setPurchaseForm] = useState({
+    type: 'super_likes',
+    quantity: 5,
+    platform: 'ios',
+  })
+
+  const loadUserDetail = useCallback(async () => {
+    const detail = await apiGet(`/admin/users/${userId}`)
+    setUser(detail)
+  }, [userId])
+
+  const loadSubscription = useCallback(async () => {
+    setSubscriptionLoading(true)
+    try {
+      const snapshot = await apiGet(`/admin/users/${userId}/subscription`)
+      setSubscription(snapshot)
+    } catch {
+      setSubscription(null)
+    } finally {
+      setSubscriptionLoading(false)
+    }
+  }, [userId])
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadUserDetail(), loadSubscription()])
+  }, [loadUserDetail, loadSubscription])
 
   useEffect(() => {
     if (!userId) return
     setLoading(true)
     setTab('profile')
-    apiGet(`/admin/users/${userId}`)
-      .then(setUser)
+    setActionError('')
+    setActionSuccess('')
+    refreshAll()
       .catch(() => setUser(null))
       .finally(() => setLoading(false))
-  }, [userId])
+  }, [userId, refreshAll])
+
+  const withAction = useCallback(async (fn, successMessage) => {
+    setActionLoading(true)
+    setActionError('')
+    setActionSuccess('')
+    try {
+      await fn()
+      await refreshAll()
+      if (typeof onUserUpdated === 'function') {
+        await onUserUpdated()
+      }
+      if (successMessage) setActionSuccess(successMessage)
+    } catch (err) {
+      setActionError(err?.message || 'Request failed')
+    } finally {
+      setActionLoading(false)
+    }
+  }, [onUserUpdated, refreshAll])
+
+  const grantSubscription = useCallback(async () => {
+    await withAction(
+      () => apiPost(`/admin/users/${userId}/subscription/grant`, subForm),
+      'Subscription granted successfully.',
+    )
+  }, [userId, subForm, withAction])
+
+  const cancelSubscription = useCallback(async () => {
+    await withAction(
+      () => apiPost(`/admin/users/${userId}/subscription/cancel`, {}),
+      'Subscription cancelled.',
+    )
+  }, [userId, withAction])
+
+  const grantConsumables = useCallback(async () => {
+    await withAction(
+      () => apiPost(`/admin/users/${userId}/consumables/grant`, {
+        ...purchaseForm,
+        quantity: Number(purchaseForm.quantity || 0),
+      }),
+      'Consumables granted successfully.',
+    )
+  }, [userId, purchaseForm, withAction])
 
   if (!userId) return null
 
@@ -97,7 +201,7 @@ function UserDrawer({ userId, onClose }) {
 
             {/* Tabs */}
             <div className={`flex border-b ${adminTokens.borderSoft} px-5`}>
-              {[['profile', 'Profile'], ['activity', 'Activity'], ['reports', 'Reports']].map(([k, l]) => (
+              {[['profile', 'Profile'], ['activity', 'Activity'], ['reports', 'Reports'], ['subscription', 'Subscription']].map(([k, l]) => (
                 <button
                   key={k}
                   onClick={() => setTab(k)}
@@ -169,6 +273,142 @@ function UserDrawer({ userId, onClose }) {
                   )}
                 </div>
               )}
+
+              {tab === 'subscription' && (
+                <div className="space-y-4">
+                  {(actionError || actionSuccess) && (
+                    <div className={`rounded-lg border p-2.5 text-xs ${actionError ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'}`}>
+                      {actionError || actionSuccess}
+                    </div>
+                  )}
+
+                  <section className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev2} p-3`}>
+                    <div className={`mb-2 text-[11px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Current membership</div>
+                    {subscriptionLoading ? (
+                      <div className={`text-xs ${adminTokens.textMute}`}>Loading membership…</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <DRow k="Effective plan" v={subscription?.effectivePlan || 'free'} />
+                        <DRow k="Status" v={subscription?.activeSubscription?.status || 'free'} />
+                        <DRow k="Plan id" v={subscription?.activeSubscription?.planId || '—'} />
+                        <DRow k="Duration" v={subscription?.activeSubscription?.duration || '—'} />
+                        <DRow k="Started" v={formatDateTime(subscription?.activeSubscription?.startedAt)} />
+                        <DRow k="Expires" v={formatDateTime(subscription?.activeSubscription?.expiresAt)} />
+                        <DRow k="Super Likes" v={subscription?.balances?.superLikesLeft ?? 0} />
+                        <DRow k="Boosts" v={subscription?.balances?.boostsLeft ?? 0} />
+                      </div>
+                    )}
+                  </section>
+
+                  <section className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev2} p-3`}>
+                    <div className={`mb-2 text-[11px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Grant subscription</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="space-y-1">
+                        <span className={`block text-[10px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Plan</span>
+                        <select
+                          value={subForm.planId}
+                          onChange={(e) => setSubForm((s) => ({ ...s, planId: e.target.value }))}
+                          className={`w-full rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
+                        >
+                          <option value="plus">Plus</option>
+                          <option value="platin">Platin</option>
+                        </select>
+                      </label>
+                      <label className="space-y-1">
+                        <span className={`block text-[10px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Duration</span>
+                        <select
+                          value={subForm.duration}
+                          onChange={(e) => setSubForm((s) => ({ ...s, duration: e.target.value }))}
+                          className={`w-full rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
+                        >
+                          <option value="1w">1w</option>
+                          <option value="1m">1m</option>
+                          <option value="3m">3m</option>
+                          <option value="6m">6m</option>
+                        </select>
+                      </label>
+                      <label className="space-y-1">
+                        <span className={`block text-[10px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Platform</span>
+                        <select
+                          value={subForm.platform}
+                          onChange={(e) => setSubForm((s) => ({ ...s, platform: e.target.value }))}
+                          className={`w-full rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
+                        >
+                          <option value="ios">iOS</option>
+                          <option value="android">Android</option>
+                          <option value="web">Web</option>
+                        </select>
+                      </label>
+                      <label className="space-y-1">
+                        <span className={`block text-[10px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Expiry</span>
+                        <select
+                          value={subForm.expiryPreset}
+                          onChange={(e) => setSubForm((s) => ({ ...s, expiryPreset: e.target.value }))}
+                          className={`w-full rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
+                        >
+                          {SUBSCRIPTION_PRESETS.map(([value, label]) => (
+                            <option key={value} value={value}>{label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        onClick={grantSubscription}
+                        disabled={actionLoading}
+                        className="rounded-lg bg-[oklch(0.72_0.15_25)] px-3 py-1.5 text-xs font-medium text-[oklch(0.18_0.04_25)] disabled:opacity-60"
+                      >
+                        {actionLoading ? 'Working…' : 'Grant subscription'}
+                      </button>
+                      <button
+                        onClick={cancelSubscription}
+                        disabled={actionLoading}
+                        className={`rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 disabled:opacity-60`}
+                      >
+                        Cancel active subscription
+                      </button>
+                    </div>
+                  </section>
+
+                  <section className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev2} p-3`}>
+                    <div className={`mb-2 text-[11px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Grant consumables</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <select
+                        value={purchaseForm.type}
+                        onChange={(e) => setPurchaseForm((s) => ({ ...s, type: e.target.value }))}
+                        className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
+                      >
+                        <option value="super_likes">Super Likes</option>
+                        <option value="boosts">Boosts</option>
+                      </select>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={purchaseForm.quantity}
+                        onChange={(e) => setPurchaseForm((s) => ({ ...s, quantity: e.target.value }))}
+                        className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
+                      />
+                      <select
+                        value={purchaseForm.platform}
+                        onChange={(e) => setPurchaseForm((s) => ({ ...s, platform: e.target.value }))}
+                        className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
+                      >
+                        <option value="ios">iOS</option>
+                        <option value="android">Android</option>
+                        <option value="web">Web</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={grantConsumables}
+                      disabled={actionLoading}
+                      className="mt-2 rounded-lg bg-[oklch(0.72_0.15_25)] px-3 py-1.5 text-xs font-medium text-[oklch(0.18_0.04_25)] disabled:opacity-60"
+                    >
+                      {actionLoading ? 'Working…' : 'Grant consumables'}
+                    </button>
+                  </section>
+                </div>
+              )}
             </div>
           </>
         )}
@@ -237,11 +477,7 @@ export function UsersPage() {
       <PageHead
         title="Users"
         sub={`${stats.total.toLocaleString()} total · ${stats.activeToday.toLocaleString()} active today`}
-        actions={
-          <button className={`flex items-center gap-1.5 rounded-lg border ${adminTokens.borderSoft} px-3 py-1.5 text-xs font-medium ${adminTokens.textDim} hover:${adminTokens.bgElev2}`}>
-            <Download className="h-3.5 w-3.5" /> Export CSV
-          </button>
-        }
+        
       />
 
       {/* Filters bar */}
@@ -403,7 +639,11 @@ export function UsersPage() {
       </div>
 
       {/* User detail drawer */}
-      <UserDrawer userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
+      <UserDrawer
+        userId={selectedUserId}
+        onClose={() => setSelectedUserId(null)}
+        onUserUpdated={fetchUsers}
+      />
     </div>
   )
 }

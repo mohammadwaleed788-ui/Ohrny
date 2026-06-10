@@ -163,7 +163,7 @@ export function AdminSidebar({
     <aside className={`sticky top-0 flex h-screen flex-col border-r ${adminTokens.borderSoft} bg-[oklch(0.155_0.008_260)]`}>
       <WorkspaceSwitcher collapsed={collapsed} />
 
-      <nav className="flex-1 overflow-y-auto px-2 py-2">
+      <nav className={`flex-1 overflow-y-auto px-2 py-2 ${adminTokens.scrollbar}`}>
         {NAV.map((group) => (
           <div key={group.group} className="mb-2">
             {!collapsed && <div className={`px-2 py-2 text-[10px] uppercase tracking-[0.14em] ${adminTokens.textMute}`}>{group.group}</div>}

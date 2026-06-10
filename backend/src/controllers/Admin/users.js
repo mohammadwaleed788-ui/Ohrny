@@ -1,5 +1,56 @@
-import { sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
+import { users } from '../../../db/schema/users.js'
+import { userSubscriptions } from '../../../db/schema/subscriptions.js'
+import {
+  getEffectiveEntitlements,
+  grantPurchase,
+  syncUserPlanCache,
+} from '../../services/entitlementService.js'
+
+const ALLOWED_PLAN_IDS = new Set(['plus', 'platin'])
+const ALLOWED_DURATIONS = new Set(['1w', '1m', '3m', '6m'])
+const ALLOWED_PLATFORMS = new Set(['ios', 'android', 'web'])
+const ALLOWED_PURCHASE_TYPES = new Set(['super_likes', 'boosts'])
+const DEFAULT_EXPIRY_PRESET = '365d'
+const EXPIRY_PRESET_MS = {
+  '20m': 20 * 60 * 1000,
+  '1d': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+  '365d': 365 * 24 * 60 * 60 * 1000,
+}
+
+function normalizeLower(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function resolveExpiryDate(preset, now = new Date()) {
+  const safePreset = String(preset || DEFAULT_EXPIRY_PRESET).trim().toLowerCase()
+  if (safePreset === 'perpetual') return null
+  const ms = EXPIRY_PRESET_MS[safePreset] ?? EXPIRY_PRESET_MS[DEFAULT_EXPIRY_PRESET]
+  return new Date(now.getTime() + ms)
+}
+
+function entitlementsSnapshot(entitlements) {
+  return {
+    effectivePlan: entitlements?.plan || 'free',
+    activeSubscription: entitlements?.activeSubscription || null,
+    balances: {
+      superLikesLeft: Number(entitlements?.balances?.superLikesLeft || 0),
+      boostsLeft: Number(entitlements?.balances?.boostsLeft || 0),
+    },
+  }
+}
+
+async function ensureActiveUser(userId) {
+  const [row] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+    .limit(1)
+  return row || null
+}
 
 export async function getUsers(req, res) {
   try {
@@ -225,6 +276,160 @@ export async function getUserDetail(req, res) {
   } catch (err) {
     console.error('User detail API error:', err)
     return res.status(500).json({ error: 'Failed to load user detail' })
+  }
+}
+
+export async function getUserSubscription(req, res) {
+  try {
+    const { userId } = req.params
+    const user = await ensureActiveUser(userId)
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    const entitlements = await getEffectiveEntitlements(userId)
+    return res.json(entitlementsSnapshot(entitlements))
+  } catch (err) {
+    console.error('Admin getUserSubscription error:', err)
+    return res.status(500).json({ error: 'Failed to load subscription snapshot' })
+  }
+}
+
+export async function grantUserSubscription(req, res) {
+  try {
+    const { userId } = req.params
+    const user = await ensureActiveUser(userId)
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    const planId = normalizeLower(req.body?.planId)
+    const duration = normalizeLower(req.body?.duration)
+    const platform = normalizeLower(req.body?.platform || 'ios')
+    const expiryPreset = normalizeLower(req.body?.expiryPreset || DEFAULT_EXPIRY_PRESET)
+
+    if (!ALLOWED_PLAN_IDS.has(planId)) return res.status(400).json({ error: 'Invalid planId' })
+    if (!ALLOWED_DURATIONS.has(duration)) return res.status(400).json({ error: 'Invalid duration' })
+    if (!ALLOWED_PLATFORMS.has(platform)) return res.status(400).json({ error: 'Invalid platform' })
+    if (expiryPreset !== 'perpetual' && !EXPIRY_PRESET_MS[expiryPreset]) {
+      return res.status(400).json({ error: 'Invalid expiryPreset' })
+    }
+
+    const now = new Date()
+    const expiresAt = resolveExpiryDate(expiryPreset, now)
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(userSubscriptions)
+        .set({ status: 'expired', updatedAt: now })
+        .where(
+          and(
+            eq(userSubscriptions.userId, userId),
+            inArray(userSubscriptions.status, ['active', 'grace_period']),
+          ),
+        )
+
+      await tx.insert(userSubscriptions).values({
+        userId,
+        planId,
+        duration,
+        status: 'active',
+        platform,
+        currency: 'PKR',
+        priceAtPurchase: '0',
+        revenueCatProductId: `ohrny_${planId}_${duration}_${platform}`,
+        revenueCatTransactionId: `admin_sub_${userId}_${now.getTime()}`,
+        startedAt: now,
+        expiresAt,
+        updatedAt: now,
+      })
+
+      await syncUserPlanCache(userId, tx)
+    })
+
+    const entitlements = await getEffectiveEntitlements(userId)
+    return res.json({
+      ok: true,
+      ...entitlementsSnapshot(entitlements),
+    })
+  } catch (err) {
+    console.error('Admin grantUserSubscription error:', err)
+    return res.status(500).json({ error: 'Failed to grant subscription' })
+  }
+}
+
+export async function cancelUserSubscription(req, res) {
+  try {
+    const { userId } = req.params
+    const user = await ensureActiveUser(userId)
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    const now = new Date()
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(userSubscriptions)
+        .set({ status: 'cancelled', cancelledAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(userSubscriptions.userId, userId),
+            inArray(userSubscriptions.status, ['active', 'grace_period']),
+            or(
+              isNull(userSubscriptions.expiresAt),
+              sql`${userSubscriptions.expiresAt} > ${now}`,
+              sql`${userSubscriptions.gracePeriodEndsAt} > ${now}`,
+            ),
+          ),
+        )
+
+      await syncUserPlanCache(userId, tx)
+    })
+
+    const entitlements = await getEffectiveEntitlements(userId)
+    return res.json({
+      ok: true,
+      ...entitlementsSnapshot(entitlements),
+    })
+  } catch (err) {
+    console.error('Admin cancelUserSubscription error:', err)
+    return res.status(500).json({ error: 'Failed to cancel subscription' })
+  }
+}
+
+export async function grantUserConsumables(req, res) {
+  try {
+    const { userId } = req.params
+    const user = await ensureActiveUser(userId)
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    const type = normalizeLower(req.body?.type)
+    const platform = normalizeLower(req.body?.platform || 'ios')
+    const quantity = Math.max(1, Math.min(1000, Math.round(Number(req.body?.quantity) || 0)))
+
+    if (!ALLOWED_PURCHASE_TYPES.has(type)) return res.status(400).json({ error: 'Invalid purchase type' })
+    if (!ALLOWED_PLATFORMS.has(platform)) return res.status(400).json({ error: 'Invalid platform' })
+    if (!quantity) return res.status(400).json({ error: 'Quantity must be positive' })
+
+    const now = new Date()
+    const transactionId = `admin_purchase_${type}_${userId}_${now.getTime()}`
+
+    const result = await grantPurchase({
+      userId,
+      type,
+      quantity,
+      priceAtPurchase: 0,
+      currency: 'PKR',
+      revenueCatProductId: `ohrny_${type === 'super_likes' ? 'superlikes' : 'boosts'}_${quantity}_${platform}`,
+      revenueCatTransactionId: transactionId,
+      platform,
+      purchasedAt: now,
+    })
+
+    const entitlements = await getEffectiveEntitlements(userId)
+    return res.json({
+      ok: true,
+      duplicate: Boolean(result?.duplicate),
+      ...entitlementsSnapshot(entitlements),
+    })
+  } catch (err) {
+    console.error('Admin grantUserConsumables error:', err)
+    return res.status(500).json({ error: 'Failed to grant consumables' })
   }
 }
 
