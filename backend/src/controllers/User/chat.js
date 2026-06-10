@@ -91,7 +91,9 @@ export async function getMatches(req, res) {
             age: users.age,
             verified: users.idVerified,
             isPaused: users.isPaused,
+            plan: users.plan,
             screenshotShield: userPrivacySettings.screenshotShield,
+            ephemeralMessages: userPrivacySettings.ephemeralMessages,
           })
           .from(users)
           .leftJoin(
@@ -162,7 +164,18 @@ export async function getMatches(req, res) {
             verified: Boolean(partner?.verified),
             mainPhoto: photo?.storageKey ?? null,
             blurAmount: photo?.blurAmount ?? 70,
-            screenshotShield: partner?.screenshotShield ?? true,
+            plan: partner?.plan ?? 'free',
+            // Screenshot Shield is a Plus feature — only report it active when
+            // the partner is actually subscribed AND has it enabled, so a free
+            // (or downgraded) user can never block the other side's captures.
+            screenshotShield:
+              Boolean(partner?.screenshotShield) &&
+              Boolean(partner?.plan && partner.plan !== 'free'),
+            // Same Plus gating — lets us tell the user "their messages vanish
+            // in 24h" so they don't think their OWN messages are being deleted.
+            ephemeralMessages:
+              Boolean(partner?.ephemeralMessages) &&
+              Boolean(partner?.plan && partner.plan !== 'free'),
             isPaused: Boolean(partner?.isPaused),
           },
           lastMessage: lastMsg
@@ -211,6 +224,9 @@ export async function getMessages(req, res) {
       isNull(messages.deletedAt),
       // Hide messages this user has chosen "Delete for me" on.
       sql`(${messages.deletedForUserId} is null or ${messages.deletedForUserId} <> ${userId})`,
+      // Hide ephemeral messages that have passed their 24h window, even before
+      // the nightly cleanup job physically deletes them.
+      sql`(${messages.isEphemeral} = false or ${messages.expiresAt} is null or ${messages.expiresAt} > now())`,
     ]
     if (cursor) {
       whereParts.push(
@@ -303,8 +319,26 @@ export async function sendMessage(req, res) {
     if (!access.ok) return res.status(access.status).json(access.body)
     const myMsgCount = access.myMessageCount
 
+    // Ephemeral is sender-controlled + Plus-gated: a message self-destructs in
+    // 24h only when the SENDER is subscribed AND has Ephemeral messages on. So
+    // only your own messages vanish — the partner's messages follow theirs.
+    const [senderPrivacy] = await db
+      .select({
+        ephemeralMessages: userPrivacySettings.ephemeralMessages,
+        plan: users.plan,
+      })
+      .from(users)
+      .leftJoin(userPrivacySettings, eq(userPrivacySettings.userId, users.id))
+      .where(eq(users.id, userId))
+      .limit(1)
+    const ephemeralOn =
+      Boolean(senderPrivacy?.ephemeralMessages) &&
+      Boolean(senderPrivacy?.plan && senderPrivacy.plan !== 'free')
+
     const now = new Date()
-    const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+    const expiresAt = ephemeralOn
+      ? new Date(now.getTime() + 24 * 60 * 60 * 1000)
+      : null
 
     const [msg] = await db
       .insert(messages)
@@ -312,7 +346,7 @@ export async function sendMessage(req, res) {
         matchId,
         senderId: userId,
         content: content.trim(),
-        isEphemeral: true,
+        isEphemeral: ephemeralOn,
         expiresAt,
         createdAt: now,
       })

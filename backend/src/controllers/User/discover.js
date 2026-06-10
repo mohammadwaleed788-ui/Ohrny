@@ -143,15 +143,33 @@ export async function getDiscoverCards(req, res) {
     const latPattern = '^-?[0-9]+(\\.[0-9]+)?$'
     const lngPattern = '^-?[0-9]+(\\.[0-9]+)?$'
 
-    const vLat = currentUser.latApprox
-    const vLng = currentUser.lngApprox
+    // Coordinates are stored as varchar, so a bare CAST(... AS double precision)
+    // throws (status 500) on empty/garbage values — and Postgres does NOT
+    // guarantee the regex guard in WHERE runs before the CAST. So: parse our own
+    // coords in JS, and cast a candidate's coords only inside a CASE that checks
+    // the numeric pattern first (→ NULL otherwise, which the bounds filter drops).
+    const coordRe = /^-?[0-9]+(\.[0-9]+)?$/
+    const parseCoord = (v) =>
+      typeof v === 'number' && Number.isFinite(v)
+        ? v
+        : typeof v === 'string' && coordRe.test(v.trim())
+          ? Number(v)
+          : null
+    const vLatNum = parseCoord(currentUser.latApprox)
+    const vLngNum = parseCoord(currentUser.lngApprox)
+    const hasSelfLocation = vLatNum != null && vLngNum != null
+    // Distance filtering only when local (non-global) AND we know where we are.
+    const distanceMode = !globalMode && hasSelfLocation
+
+    const safeLat = sql`CASE WHEN ${users.latApprox} ~ ${latPattern} THEN CAST(${users.latApprox} AS double precision) END`
+    const safeLng = sql`CASE WHEN ${users.lngApprox} ~ ${lngPattern} THEN CAST(${users.lngApprox} AS double precision) END`
     const distanceMetersSql = sql`(
       6371000.0 * 2.0 * asin(
         least(1.0, sqrt(
-          power(sin((radians(CAST(${users.latApprox} AS double precision)) - radians(CAST(${vLat} AS double precision))) / 2.0), 2) +
-          cos(radians(CAST(${vLat} AS double precision))) *
-          cos(radians(CAST(${users.latApprox} AS double precision))) *
-          power(sin((radians(CAST(${users.lngApprox} AS double precision)) - radians(CAST(${vLng} AS double precision))) / 2.0), 2)
+          power(sin((radians(${safeLat}) - radians(${vLatNum}::double precision)) / 2.0), 2) +
+          cos(radians(${vLatNum}::double precision)) *
+          cos(radians(${safeLat})) *
+          power(sin((radians(${safeLng}) - radians(${vLngNum}::double precision)) / 2.0), 2)
         ))
       )
     )`
@@ -182,10 +200,8 @@ export async function getDiscoverCards(req, res) {
       baseWhereParts.push(sql`coalesce(${users.profileCompletePct}, 0) >= 40`)
     }
 
-    if (!globalMode) {
+    if (distanceMode) {
       baseWhereParts.push(
-        sql`${currentUser.latApprox} ~ ${latPattern}`,
-        sql`${currentUser.lngApprox} ~ ${lngPattern}`,
         sql`${users.latApprox} ~ ${latPattern}`,
         sql`${users.lngApprox} ~ ${lngPattern}`,
         sql`${distanceMetersSql} <= ${maxMeters}`,
@@ -234,7 +250,7 @@ export async function getDiscoverCards(req, res) {
     }
 
     if (cursor) {
-      if (globalMode) {
+      if (!distanceMode) {
         whereParts.push(sql`${users.id} > ${cursor.id}`)
       } else {
         whereParts.push(
@@ -244,7 +260,7 @@ export async function getDiscoverCards(req, res) {
     }
 
     // ── Step 1: fetch the user rows (no subqueries) ──────────────────────────
-    const distanceSelectSql = globalMode ? sql`null` : distanceMilesSql
+    const distanceSelectSql = distanceMode ? distanceMilesSql : sql`null`
     const boostedOrderSql = sql`(
       CASE WHEN EXISTS (
         SELECT 1 FROM ${userBoosts} ub
@@ -265,7 +281,7 @@ export async function getDiscoverCards(req, res) {
         ELSE 0
       END
     )`
-    const orderByClause = globalMode
+    const orderByClause = !distanceMode
       ? [asc(boostedOrderSql), asc(compatibilityOrderSql), asc(users.id)]
       : [asc(boostedOrderSql), asc(compatibilityOrderSql), sql`${distanceMilesSql} asc`, asc(users.id)]
 

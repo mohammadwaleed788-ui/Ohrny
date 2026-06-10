@@ -23,13 +23,13 @@ import {
 import { normalizePhoneE164 } from '../../utils/phone.js'
 import { resolveOtpProvider, sendOtpWithProvider, verifyOtpWithProvider } from '../../services/otp/provider.js'
 import { getIO } from '../../socket/index.js'
-import { assertFeature } from '../../services/entitlementService.js'
+import { assertFeature, getEffectiveEntitlements } from '../../services/entitlementService.js'
 
 async function loadUserDetails(userId) {
   const [account] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!account) return null
 
-  const [lifestyle, privacySettings, discoverPreferences, photos, prompts, interests, devices] = await Promise.all([
+  const [lifestyle, privacySettings, discoverPreferences, photos, prompts, interests, devices, entitlements] = await Promise.all([
     db.select().from(userLifestyle).where(eq(userLifestyle.userId, userId)).limit(1).then((rows) => rows[0] || null),
     db.select().from(userPrivacySettings).where(eq(userPrivacySettings.userId, userId)).limit(1).then((rows) => rows[0] || null),
     db.select().from(userDiscoverPreferences).where(eq(userDiscoverPreferences.userId, userId)).limit(1).then((rows) => rows[0] || null),
@@ -37,6 +37,7 @@ async function loadUserDetails(userId) {
     db.select().from(userPrompts).where(eq(userPrompts.userId, userId)),
     db.select().from(userInterests).where(eq(userInterests.userId, userId)),
     db.select().from(userDevices).where(eq(userDevices.userId, userId)),
+    getEffectiveEntitlements(userId),
   ])
 
   return {
@@ -48,6 +49,9 @@ async function loadUserDetails(userId) {
     prompts: prompts.sort((a, b) => a.position - b.position),
     interests: interests.sort((a, b) => a.position - b.position),
     devices: devices.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)),
+    // Single source of truth for plan / active subscription / balances /
+    // limits / feature flags — the client reads everything from here.
+    entitlements: entitlements || null,
   }
 }
 
