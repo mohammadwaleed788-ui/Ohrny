@@ -4,6 +4,7 @@ import { users } from '../../../db/schema/users.js'
 import { userSubscriptions } from '../../../db/schema/subscriptions.js'
 import { REVENUECAT_WEBHOOK_SECRET } from '../../config/constants.js'
 import {
+  PLAN_ORDER,
   findSubscriptionProductByRevenueCatId,
   grantPurchase,
   seedSubscriptionCatalog,
@@ -92,7 +93,17 @@ export async function handleRevenueCatWebhook(req, res) {
     }
 
     const productId = event.product_id || event.productId || event.product_identifier
-    const entitlementId = event.entitlement_id || event.entitlementId || event.entitlement_identifier
+    // RevenueCat sends `entitlement_ids` (array, e.g. ["plus"]/["platin"]); the
+    // singular `entitlement_id` is deprecated and often null — read both.
+    const entitlementIds = Array.isArray(event.entitlement_ids)
+      ? event.entitlement_ids
+      : []
+    const entitlementId =
+      event.entitlement_id ||
+      event.entitlementId ||
+      event.entitlement_identifier ||
+      entitlementIds[0] ||
+      null
     const transactionId = event.transaction_id || event.transactionId || event.original_transaction_id
     const platform = normalizePlatform(event.store || event.platform)
     const price = event.price || event.price_in_purchased_currency || event.priceInPurchasedCurrency || 0
@@ -115,11 +126,17 @@ export async function handleRevenueCatWebhook(req, res) {
       return res.json({ ok: true, type: 'purchase', duplicate: Boolean(result.duplicate) })
     }
 
+    // Resolve the plan: prefer the seeded product map (by RevenueCat product
+    // id), and fall back to the entitlement id (plus / platin) so a purchase
+    // still grants the right plan even if that exact product id wasn't seeded.
     const product = await findSubscriptionProductByRevenueCatId(productId)
-    if (!product) {
+    const entitlementPlan = [entitlementId, ...entitlementIds].find(
+      (e) => PLAN_ORDER.includes(e) && e !== 'free',
+    )
+    const planId = product?.planId || entitlementPlan || null
+    if (!planId) {
       return res.status(202).json({ ok: true, ignored: 'unknown_product' })
     }
-    const planId = product.planId
 
     const status = normalizeStatus(event.type || event.event_type)
     const now = new Date()
@@ -139,9 +156,9 @@ export async function handleRevenueCatWebhook(req, res) {
       const row = {
         userId: user.id,
         planId,
-        productId: product.id,
+        productId: product?.id || null,
         revenueCatProductId: productId || null,
-        duration: product.duration || null,
+        duration: product?.duration || null,
         revenueCatPurchaseToken: event.original_transaction_id || transactionId || null,
         revenueCatEntitlementId: entitlementId || null,
         revenueCatTransactionId: transactionId || null,
