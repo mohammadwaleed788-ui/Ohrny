@@ -399,6 +399,7 @@ async function loadActiveSubscription(userId, client = db) {
     .select({
       id: userSubscriptions.id,
       planId: userSubscriptions.planId,
+      duration: userSubscriptions.duration,
       status: userSubscriptions.status,
       startedAt: userSubscriptions.startedAt,
       expiresAt: userSubscriptions.expiresAt,
@@ -491,6 +492,7 @@ export async function getEffectiveEntitlements(userId, client = db) {
       ? {
           id: activeSubscription.id,
           planId: activeSubscription.planId,
+          duration: activeSubscription.duration,
           status: activeSubscription.status,
           startedAt: activeSubscription.startedAt,
           expiresAt: activeSubscription.expiresAt,
