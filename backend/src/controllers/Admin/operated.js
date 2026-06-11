@@ -7,14 +7,13 @@ import { userInterests, userLifestyle, userPhotos, userPrompts, users } from '..
 import { signAccessTokenUser } from '../../utils/jwt.js'
 import { generateSignedReadUrl } from '../../utils/s3.js'
 
-const HANDLE_PREFIX = 'optest_'
+const LEGACY_HANDLE_PREFIX = 'optest_'
 const PHONE_PREFIX = '555019'
 const PHONE_COUNTRY = '+1'
 
 function isOperatedUser(row) {
   return Boolean(
     row &&
-      String(row.handle || '').startsWith(HANDLE_PREFIX) &&
       row.phoneCountry === PHONE_COUNTRY &&
       String(row.phone || '').startsWith(PHONE_PREFIX),
   )
@@ -23,7 +22,19 @@ function isOperatedUser(row) {
 function slugHandle(value) {
   const raw = String(value || 'persona').toLowerCase()
   const slug = raw.replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 14)
-  return `${HANDLE_PREFIX}${slug || 'persona'}`
+  return slug || 'persona'
+}
+
+function displayNameFromHandle(handle) {
+  const raw = String(handle || '')
+  const withoutPrefix = raw.startsWith(LEGACY_HANDLE_PREFIX) ? raw.slice(LEGACY_HANDLE_PREFIX.length) : raw
+  const normalized = withoutPrefix.replace(/_+/g, ' ').trim()
+  if (!normalized) return 'Persona'
+  return normalized
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 }
 
 function clampInt(value, min, max, fallback) {
@@ -84,7 +95,7 @@ function mapPersona(row, extras = {}) {
   delete cleanExtras.photos
   return {
     id: row.id,
-    name: row.handle,
+    name: displayNameFromHandle(row.handle),
     handle: row.handle,
     age: row.age,
     gender: row.iam === 'man' ? 'Man' : row.iam === 'nonbinary' ? 'Non-binary' : 'Woman',
@@ -214,7 +225,7 @@ export async function listPersonas(req, res) {
     const rows = await db
       .select()
       .from(users)
-      .where(and(like(users.handle, `${HANDLE_PREFIX}%`), eq(users.phoneCountry, PHONE_COUNTRY), like(users.phone, `${PHONE_PREFIX}%`), isNull(users.deletedAt)))
+      .where(and(eq(users.phoneCountry, PHONE_COUNTRY), like(users.phone, `${PHONE_PREFIX}%`), isNull(users.deletedAt)))
       .orderBy(desc(users.updatedAt))
 
     const personas = await Promise.all(rows.map(summaryForUser))

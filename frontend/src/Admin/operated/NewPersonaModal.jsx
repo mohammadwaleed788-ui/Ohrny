@@ -30,43 +30,54 @@ export function NewPersonaModal({ onClose, onCreate }) {
   const [ageMax, setAgeMax] = useState(70)
   const [promptOne, setPromptOne] = useState('Coffee, a long walk, and a conversation that accidentally lasts two hours.')
   const [promptTwo, setPromptTwo] = useState('Kindness, curiosity, and a real laugh.')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState('')
 
-  const create = () => {
+  const create = async () => {
+    if (creating) return
     const cleanInterests = interests
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean)
       .slice(0, 6)
 
-    onCreate({
-      name,
-      age,
-      gender,
-      orientation: [orientation],
-      intent,
-      relStatus,
-      city,
-      countryCode,
-      latApprox,
-      lngApprox,
-      bio,
-      work,
-      height,
-      edu,
-      drinks,
-      smokes,
-      kids,
-      interests: cleanInterests,
-      photos: Array.from({ length: photoCount }, (_, index) => ({ position: index + 1 })),
-      maxDistance,
-      ageMin,
-      ageMax,
-      prompts: [
-        { position: 1, title: 'A PERFECT SUNDAY', answer: promptOne },
-        { position: 2, title: 'NON-NEGOTIABLES', answer: promptTwo },
-      ],
-      hue: Math.floor(Math.random() * 360),
-    })
+    setCreating(true)
+    setError('')
+    try {
+      await onCreate({
+        name,
+        age,
+        gender,
+        orientation: [orientation],
+        intent,
+        relStatus,
+        city,
+        countryCode,
+        latApprox,
+        lngApprox,
+        bio,
+        work,
+        height,
+        edu,
+        drinks,
+        smokes,
+        kids,
+        interests: cleanInterests,
+        photos: Array.from({ length: photoCount }, (_, index) => ({ position: index + 1 })),
+        maxDistance,
+        ageMin,
+        ageMax,
+        prompts: [
+          { position: 1, title: 'A PERFECT SUNDAY', answer: promptOne },
+          { position: 2, title: 'NON-NEGOTIABLES', answer: promptTwo },
+        ],
+        hue: Math.floor(Math.random() * 360),
+      })
+    } catch (err) {
+      setError(err?.message || 'Failed to create persona')
+    } finally {
+      setCreating(false)
+    }
   }
 
   return (
@@ -118,9 +129,12 @@ export function NewPersonaModal({ onClose, onCreate }) {
           </div>
         </div>
         <div className={`flex justify-end gap-2 border-t ${op.borderSoft} p-4`}>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button tone="primary" disabled={!name || !city} onClick={create}><Plus className="h-4 w-4" /> Create persona</Button>
+          <Button onClick={onClose} disabled={creating}>Cancel</Button>
+          <Button tone="primary" className="cursor-pointer" disabled={creating || !name || !city} onClick={create}>
+            <Plus className="h-4 w-4" /> {creating ? 'Creating...' : 'Create persona'}
+          </Button>
         </div>
+        {error && <p className={`px-4 pb-4 text-sm ${op.bad}`}>{error}</p>}
       </div>
     </div>
   )

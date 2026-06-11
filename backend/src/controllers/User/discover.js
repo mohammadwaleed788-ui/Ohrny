@@ -11,7 +11,6 @@ import { assertCanSwipe, consumeSwipe, getEffectiveEntitlements } from '../../se
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
-const OPERATED_HANDLE_PREFIX = 'optest_'
 const OPERATED_PHONE_PREFIX = '555019'
 const OPERATED_PHONE_COUNTRY = '+1'
 
@@ -91,7 +90,6 @@ export async function getDiscoverCards(req, res) {
     const currentUser = currentUserRows[0]
     const isOperatedUser = Boolean(
       currentUser &&
-      String(currentUser.handle || '').startsWith(OPERATED_HANDLE_PREFIX) &&
       currentUser.phoneCountry === OPERATED_PHONE_COUNTRY &&
       String(currentUser.phone || '').startsWith(OPERATED_PHONE_PREFIX),
     )
