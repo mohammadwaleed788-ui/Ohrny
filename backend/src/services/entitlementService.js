@@ -475,7 +475,18 @@ export async function getEffectiveEntitlements(userId, client = db) {
 
   const user = await resetDailySwipesIfNeeded(rawUser, client)
   const activeSubscription = await loadActiveSubscription(userId, client)
-  const planId = activeSubscription?.planId || (PLAN_ORDER.includes(user.plan) ? user.plan : 'free')
+  // The active subscription row is the source of truth. Do NOT fall back to the
+  // cached users.plan column — a sub that expired by time (with no EXPIRATION
+  // webhook) would otherwise keep the user on a paid tier forever.
+  const planId = activeSubscription?.planId || 'free'
+  // Self-heal the cached column so it matches reality (only on the real db
+  // connection, never inside a caller's transaction).
+  if (user.plan !== planId && client === db) {
+    await client
+      .update(users)
+      .set({ plan: planId, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+  }
   const plan = activeSubscription?.plan
     ? rowToPlanConfig(activeSubscription.plan, planId)
     : await loadPlan(planId, client)

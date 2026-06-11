@@ -843,11 +843,15 @@ export async function updatePreferences(req, res) {
     }
     for (const [field, config] of Object.entries(paidFilters)) {
       if (config.value === undefined) continue
-      if (Boolean(config.value)) {
+      let enabled = Boolean(config.value)
+      // A premium filter can only be ON if the user is entitled. Instead of
+      // failing the whole save (the client re-sends stored flags every time),
+      // silently coerce it OFF for non-entitled users.
+      if (enabled) {
         const access = await assertFeature(userId, config.feature)
-        if (!access.ok) return res.status(access.status).json(access.body)
+        if (!access.ok) enabled = false
       }
-      prefUpdates[field] = Boolean(config.value)
+      prefUpdates[field] = enabled
     }
 
     await db.transaction(async (tx) => {
