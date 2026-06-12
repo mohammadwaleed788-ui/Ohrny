@@ -8,6 +8,7 @@ import { userBoosts } from '../../../db/schema/subscriptions.js'
 import { notifyNewLike, notifyNewMatch } from '../../services/notifications/likeNotification.js'
 import { attachUsersToMatchRoom } from '../../socket/index.js'
 import { assertCanSwipe, consumeSwipe, getEffectiveEntitlements } from '../../services/entitlementService.js'
+import { decodeDiscoverCursor, encodeDiscoverCursor } from './discoverCursor.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -18,23 +19,6 @@ function clampInt(value, min, max, fallback) {
   const n = Number(value)
   if (!Number.isFinite(n)) return fallback
   return Math.max(min, Math.min(max, Math.round(n)))
-}
-
-function decodeCursor(raw) {
-  if (!raw || typeof raw !== 'string') return null
-  try {
-    const decoded = Buffer.from(raw, 'base64url').toString('utf8')
-    const [distanceStr, id] = decoded.split('|')
-    const distance = Number(distanceStr)
-    if (!Number.isFinite(distance) || !id) return null
-    return { distance, id }
-  } catch {
-    return null
-  }
-}
-
-function encodeCursor(distance, id) {
-  return Buffer.from(`${distance}|${id}`, 'utf8').toString('base64url')
 }
 
 const ALL_REL_GOALS = ['casual', 'dating', 'serious', 'non_monogamy', 'friends', 'figuring_out']
@@ -67,7 +51,7 @@ function sortPair(user1, user2) {
 export async function getDiscoverCards(req, res) {
   try {
     const limit = clampInt(req.query.limit, 1, MAX_LIMIT, DEFAULT_LIMIT)
-    const cursor = decodeCursor(req.query.cursor)
+    const cursor = decodeDiscoverCursor(req.query.cursor)
     // resetPasses=true: re-show passed users but still hide liked ones.
     // resetAll=true: fully restart deck and ignore swipe history.
     const resetPasses = req.query.resetPasses === 'true'
@@ -247,18 +231,7 @@ export async function getDiscoverCards(req, res) {
       )
     }
 
-    if (cursor) {
-      if (!distanceMode) {
-        whereParts.push(sql`${users.id} > ${cursor.id}`)
-      } else {
-        whereParts.push(
-          sql`(${distanceMilesSql} > ${cursor.distance} OR (${distanceMilesSql} = ${cursor.distance} AND ${users.id} > ${cursor.id}))`,
-        )
-      }
-    }
-
-    // ── Step 1: fetch the user rows (no subqueries) ──────────────────────────
-    const distanceSelectSql = distanceMode ? distanceMilesSql : sql`null`
+    // ── Sort-rank expressions (shared by ORDER BY, SELECT and the cursor) ────
     const boostedOrderSql = sql`(
       CASE WHEN EXISTS (
         SELECT 1 FROM ${userBoosts} ub
@@ -277,6 +250,41 @@ export async function getDiscoverCards(req, res) {
         ELSE 2
       END
     )`
+
+    if (cursor) {
+      if (cursor.version === 2) {
+        // Keyset pagination over the *full* sort tuple (boost → compat →
+        // distance → id) via a lexicographic row comparison, so boosted
+        // profiles stay correctly ordered across pages. Keys the current
+        // config doesn't sort by (or that the cursor lacks, e.g. after a
+        // mid-session prefs change) are skipped.
+        const keyExprs = [boostedOrderSql]
+        const keyValues = [sql`${cursor.boostRank}`]
+        if (advancedCompatibility && cursor.compatRank != null) {
+          keyExprs.push(compatibilityOrderSql)
+          keyValues.push(sql`${cursor.compatRank}`)
+        }
+        if (distanceMode && cursor.distance != null) {
+          keyExprs.push(distanceMilesSql)
+          keyValues.push(sql`${cursor.distance}`)
+        }
+        keyExprs.push(sql`${users.id}`)
+        keyValues.push(sql`${cursor.id}`)
+        whereParts.push(
+          sql`(${sql.join(keyExprs, sql`, `)}) > (${sql.join(keyValues, sql`, `)})`,
+        )
+      } else if (!distanceMode) {
+        // Legacy v1 cursor ("distance|id") — keep old behavior for in-flight clients.
+        whereParts.push(sql`${users.id} > ${cursor.id}`)
+      } else {
+        whereParts.push(
+          sql`(${distanceMilesSql} > ${cursor.distance} OR (${distanceMilesSql} = ${cursor.distance} AND ${users.id} > ${cursor.id}))`,
+        )
+      }
+    }
+
+    // ── Step 1: fetch the user rows (no subqueries) ──────────────────────────
+    const distanceSelectSql = distanceMode ? distanceMilesSql : sql`null`
     // Build the sort list simply: boosted first, then (only if the premium
     // feature is on) compatibility, then distance (local mode), then id.
     const orderByClause = [asc(boostedOrderSql)]
@@ -298,6 +306,8 @@ export async function getDiscoverCards(req, res) {
         city: users.city,
         verified: users.idVerified,
         distanceMiles: distanceSelectSql,
+        boostRank: boostedOrderSql,
+        compatRank: advancedCompatibility ? compatibilityOrderSql : sql`null`,
       })
       .from(users)
       .where(sql.join(whereParts, sql` and `))
@@ -401,6 +411,7 @@ export async function getDiscoverCards(req, res) {
         aboutMe: row.aboutMe ?? null,
         city: row.city ?? null,
         verified: Boolean(row.verified),
+        isBoosted: Number(row.boostRank) === 0,
         distanceMiles: distanceMiles != null ? Number(distanceMiles.toFixed(2)) : null,
         distanceLabel: distanceMiles != null ? `${Math.max(1, Math.round(distanceMiles))} mi` : null,
         interests,
@@ -412,7 +423,16 @@ export async function getDiscoverCards(req, res) {
 
     const lastRaw = sliced[sliced.length - 1]
     const nextCursor = hasMore && lastRaw
-      ? encodeCursor(lastRaw.distanceMiles != null ? Number(lastRaw.distanceMiles) : 0, lastRaw.id)
+      ? encodeDiscoverCursor({
+          boostRank: Number(lastRaw.boostRank ?? 1),
+          compatRank: advancedCompatibility && lastRaw.compatRank != null
+            ? Number(lastRaw.compatRank)
+            : null,
+          distance: distanceMode && lastRaw.distanceMiles != null
+            ? Number(lastRaw.distanceMiles)
+            : null,
+          id: lastRaw.id,
+        })
       : null
 
     return res.json({ cards, nextCursor, hasMore })
