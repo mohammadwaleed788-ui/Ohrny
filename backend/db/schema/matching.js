@@ -55,7 +55,7 @@ export const matches = pgTable('matches', {
   userASeenMatch:         boolean('user_a_seen_match').notNull().default(false),
   userBSeenMatch:         boolean('user_b_seen_match').notNull().default(false),
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
+  // ── Lifecycle ──────────────────────────────────────────────────────────────  
   isActive:               boolean('is_active').notNull().default(true),
   unmatchedAt:            timestamp('unmatched_at', { withTimezone: true }),
   unmatchedByUserId:      uuid('unmatched_by_user_id').references(() => users.id),

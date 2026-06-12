@@ -656,15 +656,8 @@ export async function activateBoost(userId, client = db) {
     if (!entitlements) {
       return { ok: false, status: 404, body: { error: 'user_not_found' } }
     }
-    if (entitlements.balances.boostsLeft <= 0) {
-      return {
-        ok: false,
-        status: 403,
-        body: { error: 'insufficient_balance', type: 'boosts' },
-      }
-    }
-
-    const now = new Date()
+    // A boost already running takes precedence over balance: you can't run two,
+    // and the client should sync its timer (409) rather than be told to buy.
     if (entitlements.activeBoost) {
       return {
         ok: false,
@@ -675,7 +668,15 @@ export async function activateBoost(userId, client = db) {
         },
       }
     }
+    if (entitlements.balances.boostsLeft <= 0) {
+      return {
+        ok: false,
+        status: 403,
+        body: { error: 'insufficient_balance', type: 'boosts' },
+      }
+    }
 
+    const now = new Date()
     const expiresAt = new Date(now.getTime() + 30 * 60 * 1000)
     await tx
       .update(users)
@@ -688,6 +689,32 @@ export async function activateBoost(userId, client = db) {
       .returning()
 
     return { ok: true, boost }
+  })
+}
+
+// Cancel the running boost early. The boost is CONSUMED (no refund) — otherwise
+// a user could cancel near the end and re-use the same boost indefinitely.
+// Returns the current balance (unchanged) for the client to sync.
+export async function cancelBoost(userId, client = db) {
+  return client.transaction(async (tx) => {
+    const active = await getActiveBoost(userId, tx)
+    if (!active) {
+      return { ok: false, status: 409, body: { error: 'no_active_boost' } }
+    }
+
+    const now = new Date()
+    await tx
+      .update(userBoosts)
+      .set({ isActive: false, expiresAt: now })
+      .where(eq(userBoosts.id, active.id))
+
+    const [row] = await tx
+      .select({ boostsLeft: users.boostsLeft })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+
+    return { ok: true, boostsLeft: Number(row?.boostsLeft || 0) }
   })
 }
 
