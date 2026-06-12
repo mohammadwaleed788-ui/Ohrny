@@ -433,6 +433,29 @@ async function loadActiveSubscription(userId, client = db) {
   return rows[0] || null
 }
 
+// The user's currently running boost window, or null. A boost is active when
+// is_active = true AND it hasn't expired yet (the 5-min cleanup cron can lag).
+export async function getActiveBoost(userId, client = db) {
+  const [activeBoost] = await client
+    .select({
+      id: userBoosts.id,
+      startedAt: userBoosts.startedAt,
+      expiresAt: userBoosts.expiresAt,
+    })
+    .from(userBoosts)
+    .where(
+      and(
+        eq(userBoosts.userId, userId),
+        eq(userBoosts.isActive, true),
+        sql`${userBoosts.expiresAt} > ${new Date()}`,
+      ),
+    )
+    .orderBy(desc(userBoosts.expiresAt))
+    .limit(1)
+
+  return activeBoost || null
+}
+
 export async function getStartedChatCount(userId, client = db) {
   const rows = await client
     .selectDistinct({ matchId: messages.matchId })
@@ -491,6 +514,7 @@ export async function getEffectiveEntitlements(userId, client = db) {
     ? rowToPlanConfig(activeSubscription.plan, planId)
     : await loadPlan(planId, client)
   const startedChats = await getStartedChatCount(userId, client)
+  const activeBoost = await getActiveBoost(userId, client)
 
   const features = {}
   for (const key of FEATURE_KEYS) features[key] = Boolean(plan[key])
@@ -525,6 +549,7 @@ export async function getEffectiveEntitlements(userId, client = db) {
       superLikesLeft: Number(user.superLikesLeft || 0),
       boostsLeft: Number(user.boostsLeft || 0),
     },
+    activeBoost,
     features,
   }
 }
@@ -640,29 +665,13 @@ export async function activateBoost(userId, client = db) {
     }
 
     const now = new Date()
-    const [existingActive] = await tx
-      .select({
-        id: userBoosts.id,
-        startedAt: userBoosts.startedAt,
-        expiresAt: userBoosts.expiresAt,
-      })
-      .from(userBoosts)
-      .where(
-        and(
-          eq(userBoosts.userId, userId),
-          eq(userBoosts.isActive, true),
-          sql`${userBoosts.expiresAt} > ${now}`,
-        ),
-      )
-      .orderBy(desc(userBoosts.expiresAt))
-      .limit(1)
-    if (existingActive) {
+    if (entitlements.activeBoost) {
       return {
         ok: false,
         status: 409,
         body: {
           error: 'boost_already_active',
-          activeBoost: existingActive,
+          activeBoost: entitlements.activeBoost,
         },
       }
     }
