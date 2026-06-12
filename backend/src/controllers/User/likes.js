@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { likes, matches } from '../../../db/schema/matching.js'
 import { users, userPhotos } from '../../../db/schema/users.js'
@@ -106,9 +106,12 @@ export async function getReceivedLikes(req, res) {
     const userId = req.user.id
     const limit = clampInt(req.query.limit, 1, MAX_LIMIT, DEFAULT_LIMIT)
     const cursor = decodeCursor(req.query.cursor)
+    // "Likes You" is now visible to everyone — free users see who liked them
+    // (name, age, photo). Liking back is the gated action (enforced in likeBack).
+    // `canSeeLikes` here only tells the app whether to allow like-back or paywall.
     const access = await assertFeature(userId, 'canSeeLikes')
     if (!access.ok && access.status !== 403) return res.status(access.status).json(access.body)
-    const unlocked = access.ok
+    const canLikeBack = access.ok
 
     const whereParts = [
       eq(likes.toUserId, userId),
@@ -140,6 +143,7 @@ export async function getReceivedLikes(req, res) {
       .select({
         likeId: likes.id,
         createdAt: likes.createdAt,
+        seenAt: likes.seenAt,
         type: likes.type,
         fromUserId: likes.fromUserId,
         handle: users.handle,
@@ -172,7 +176,11 @@ export async function getReceivedLikes(req, res) {
       .limit(limit + 1)
 
     const [countRow] = await db
-      .select({ count: sql`count(*)::int` })
+      .select({
+        count: sql`count(*)::int`,
+        // Unseen (NEW) inbound likes — drives the "Likes You" badge.
+        newCount: sql`count(*) filter (where ${likes.seenAt} is null)::int`,
+      })
       .from(likes)
       .innerJoin(users, eq(users.id, likes.fromUserId))
       .where(
@@ -216,26 +224,11 @@ export async function getReceivedLikes(req, res) {
         row.latApprox,
         row.lngApprox,
       )
-      if (!unlocked) {
-        return {
-          fromUserId: row.fromUserId,
-          type: row.type,
-          superLike: isSuperLike,
-          handle: '•••••••',
-          age: null,
-          pronouns: null,
-          verified: false,
-          distanceLabel,
-          mainPhoto: row.mainPhoto,
-          blurred: true,
-          note: isSuperLike ? 'Sent you a Super Like' : null,
-        }
-      }
-
       return {
         fromUserId: row.fromUserId,
         type: row.type,
         superLike: isSuperLike,
+        // Everyone sees the real card now. Liking back is the gated action.
         handle: row.handle,
         age: row.age,
         pronouns: row.pronouns,
@@ -246,6 +239,8 @@ export async function getReceivedLikes(req, res) {
         // unlock — that's a per-match property — so a re-like after unmatch
         // must not carry over the previous match's unlocked state.
         blurred: Boolean(row.mainPhotoIsBlurred ?? true),
+        // NEW until the viewer opens this liker's profile (clears the badge).
+        seen: row.seenAt != null,
         note: isSuperLike ? 'Sent you a Super Like' : null,
       }
     })
@@ -255,12 +250,15 @@ export async function getReceivedLikes(req, res) {
 
     return res.json({
       count: Number(countRow?.count || 0),
+      newCount: Number(countRow?.newCount || 0),
       items,
       nextCursor,
       hasMore,
       access: {
-        canSeeLikes: unlocked,
-        paywall: unlocked ? null : 'plus',
+        // Free users can SEE who liked them; canSeeLikes now gates liking back.
+        canSeeLikes: canLikeBack,
+        canLikeBack,
+        paywall: canLikeBack ? null : 'plus',
       },
     })
   } catch (err) {
@@ -271,10 +269,8 @@ export async function getReceivedLikes(req, res) {
 
 export async function passLiker(req, res) {
   try {
+    // Passing on a liker is free — it just hides them. (Liking back is gated.)
     const userId = req.user.id
-    const access = await assertFeature(userId, 'canSeeLikes')
-    if (!access.ok) return res.status(access.status).json(access.body)
-
     const fromUserId = req.params.fromUserId
     if (!fromUserId) return res.status(400).json({ error: 'Invalid user' })
 
@@ -315,6 +311,106 @@ export async function passLiker(req, res) {
   }
 }
 
+// Mark an inbound like as SEEN — called when the viewer opens that liker's
+// profile. Clears it from the "Likes You" new-like badge. Free + paid.
+export async function markLikerSeen(req, res) {
+  try {
+    const userId = req.user.id
+    const fromUserId = req.params.fromUserId
+    if (!fromUserId) return res.status(400).json({ error: 'Invalid user' })
+
+    await db
+      .update(likes)
+      .set({ seenAt: new Date() })
+      .where(
+        and(
+          eq(likes.toUserId, userId),
+          eq(likes.fromUserId, fromUserId),
+          inArray(likes.type, ['like', 'super_like']),
+          sql`${likes.seenAt} is null`,
+        ),
+      )
+
+    return res.json({ ok: true })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Failed to mark like seen' })
+  }
+}
+
+// Mark a match as SEEN by this user — called when they open the matched card
+// in "Your Likes". Clears it from the new-match badge. Keyed by the other
+// user's id (the app has that, not the matchId).
+export async function markMatchSeen(req, res) {
+  try {
+    const userId = req.user.id
+    const otherUserId = req.params.otherUserId
+    if (!otherUserId) return res.status(400).json({ error: 'Invalid user' })
+
+    const pair = sortPair(userId, otherUserId)
+    const iAmUserA = pair.userAId === userId
+    await db
+      .update(matches)
+      .set(iAmUserA ? { userASeenMatch: true } : { userBSeenMatch: true })
+      .where(and(eq(matches.userAId, pair.userAId), eq(matches.userBId, pair.userBId)))
+
+    return res.json({ ok: true })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Failed to mark match seen' })
+  }
+}
+
+// Lightweight badge feed: how many NEW likes + NEW matches this user has.
+// Used by the app to seed the bottom-nav / tab badges (socket keeps them live).
+export async function getLikesActivity(req, res) {
+  try {
+    const userId = req.user.id
+
+    const [likeRow] = await db
+      .select({ newLikes: sql`count(*)::int` })
+      .from(likes)
+      .innerJoin(users, eq(users.id, likes.fromUserId))
+      .where(
+        and(
+          eq(likes.toUserId, userId),
+          inArray(likes.type, ['like', 'super_like']),
+          sql`${likes.seenAt} is null`,
+          eq(users.isBanned, false),
+          eq(users.isPaused, false),
+          sql`${users.deletedAt} is null`,
+          sql`not exists (
+            select 1 from ${likes} my_swipe
+            where my_swipe.from_user_id = ${userId}
+              and my_swipe.to_user_id = ${likes.fromUserId}
+              and my_swipe.type in ('like', 'super_like', 'pass')
+          )`,
+        ),
+      )
+
+    const [matchRow] = await db
+      .select({ newMatches: sql`count(*)::int` })
+      .from(matches)
+      .where(
+        and(
+          eq(matches.isActive, true),
+          or(
+            and(eq(matches.userAId, userId), eq(matches.userASeenMatch, false)),
+            and(eq(matches.userBId, userId), eq(matches.userBSeenMatch, false)),
+          ),
+        ),
+      )
+
+    return res.json({
+      newLikes: Number(likeRow?.newLikes || 0),
+      newMatches: Number(matchRow?.newMatches || 0),
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Failed to load activity' })
+  }
+}
+
 export async function getSentLikes(req, res) {
   try {
     const userId = req.user.id
@@ -349,6 +445,9 @@ export async function getSentLikes(req, res) {
           createdAt: likes.createdAt,
           type: likes.type,
           matchId: likes.matchId,
+          // Whether I (the sender) have already opened this matched card.
+          myMatchSeen: sql`case when ${matches.userAId} = ${userId}
+            then ${matches.userASeenMatch} else ${matches.userBSeenMatch} end`,
           toUserId: likes.toUserId,
           handle: users.handle,
           age: users.age,
@@ -383,14 +482,23 @@ export async function getSentLikes(req, res) {
         })
         .from(likes)
         .innerJoin(users, eq(users.id, likes.toUserId))
+        .leftJoin(matches, eq(matches.id, likes.matchId))
         .where(and(...whereParts))
         .orderBy(desc(likes.createdAt), desc(likes.id))
         .limit(limit + 1),
 
       db
-        .select({ count: sql`count(*)::int` })
+        .select({
+          count: sql`count(*)::int`,
+          // NEW (unseen) matches among my sent likes — drives "Your Likes" badge.
+          newMatchCount: sql`count(*) filter (
+            where ${likes.matchId} is not null and case when ${matches.userAId} = ${userId}
+              then ${matches.userASeenMatch} else ${matches.userBSeenMatch} end = false
+          )::int`,
+        })
         .from(likes)
         .innerJoin(users, eq(users.id, likes.toUserId))
+        .leftJoin(matches, eq(matches.id, likes.matchId))
         .where(and(...baseWhere)),
 
       db
@@ -418,6 +526,9 @@ export async function getSentLikes(req, res) {
       mainPhotoBlurAmount: Number(row.mainPhotoBlurAmount ?? 70),
       sentAt: row.createdAt,
       matched: row.matchId != null,
+      matchId: row.matchId ?? null,
+      // NEW match the sender hasn't opened yet (purple dot + badge).
+      isNewMatch: row.matchId != null && row.myMatchSeen === false,
     }))
 
     const last = sliced[sliced.length - 1]
@@ -425,6 +536,7 @@ export async function getSentLikes(req, res) {
 
     return res.json({
       count: Number(countRow[0]?.count || 0),
+      newMatchCount: Number(countRow[0]?.newMatchCount || 0),
       items,
       nextCursor,
       hasMore,
@@ -532,6 +644,13 @@ export async function likeBack(req, res) {
         sql`(${likes.fromUserId} = ${userId} and ${likes.toUserId} = ${fromUserId})
              or (${likes.fromUserId} = ${fromUserId} and ${likes.toUserId} = ${userId})`,
       )
+
+    // The like-back initiator (this user) is already aware of the match — mark
+    // their side seen so only the OTHER person gets the new-match badge.
+    await db
+      .update(matches)
+      .set(pair.userAId === userId ? { userASeenMatch: true } : { userBSeenMatch: true })
+      .where(eq(matches.id, matchRow.id))
 
     notifyNewMatch(fromUserId, userId)
     notifyNewMatch(userId, fromUserId)

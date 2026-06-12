@@ -48,6 +48,13 @@ export const matches = pgTable('matches', {
   messageCountUserA:      smallint('message_count_user_a').notNull().default(0),
   messageCountUserB:      smallint('message_count_user_b').notNull().default(0),
 
+  // ── "New match" badge ────────────────────────────────────────────────────
+  // Per-user flag: false while the match is still NEW to that user (drives the
+  // "Your Likes" badge + bottom-nav dot). Set true once they open the matched
+  // card. The initiator of a like-back/swipe-match is marked seen immediately.
+  userASeenMatch:         boolean('user_a_seen_match').notNull().default(false),
+  userBSeenMatch:         boolean('user_b_seen_match').notNull().default(false),
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   isActive:               boolean('is_active').notNull().default(true),
   unmatchedAt:            timestamp('unmatched_at', { withTimezone: true }),

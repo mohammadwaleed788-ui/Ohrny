@@ -13,6 +13,13 @@ export function getIO() {
   return io
 }
 
+// Fire-and-forget emit to a single user's personal room (all their devices).
+// Used for non-match realtime nudges like a new inbound like.
+export function emitToUser(userId, event, payload) {
+  if (!io || !userId || !event) return
+  io.to(`user:${userId}`).emit(event, payload)
+}
+
 export async function attachUsersToMatchRoom(userIds, matchId, options = {}) {
   if (!io || !matchId || !Array.isArray(userIds)) return
   const emitMatchNew = options.emitMatchNew ?? true

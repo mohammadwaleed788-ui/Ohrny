@@ -6,7 +6,7 @@ import { likes, matches } from '../../../db/schema/matching.js'
 import { blocks } from '../../../db/schema/safety.js'
 import { userBoosts } from '../../../db/schema/subscriptions.js'
 import { notifyNewLike, notifyNewMatch } from '../../services/notifications/likeNotification.js'
-import { attachUsersToMatchRoom } from '../../socket/index.js'
+import { attachUsersToMatchRoom, emitToUser } from '../../socket/index.js'
 import { assertCanSwipe, consumeSwipe, getEffectiveEntitlements } from '../../services/entitlementService.js'
 
 const DEFAULT_LIMIT = 20
@@ -523,6 +523,9 @@ export async function swipeDiscoverCard(req, res) {
       .limit(1)
 
     if (!reciprocal) {
+      // No match yet → instant in-app nudge so the recipient's Likes badge
+      // updates live on any tab (push covers backgrounded/terminated).
+      emitToUser(toUserId, 'like:new', { fromUserId, superLike: type === 'super_like' })
       return res.json({ ok: true, swipeType: type, matched: false })
     }
 
@@ -555,6 +558,13 @@ export async function swipeDiscoverCard(req, res) {
         sql`(${likes.fromUserId} = ${fromUserId} and ${likes.toUserId} = ${toUserId})
             or (${likes.fromUserId} = ${toUserId} and ${likes.toUserId} = ${fromUserId})`,
       )
+
+    // The swiper just saw the match screen — mark their side seen so only the
+    // other person gets the new-match badge in "Your Likes".
+    await db
+      .update(matches)
+      .set(pair.userAId === fromUserId ? { userASeenMatch: true } : { userBSeenMatch: true })
+      .where(eq(matches.id, matchRow.id))
 
     notifyNewMatch(toUserId, fromUserId)
     notifyNewMatch(fromUserId, toUserId)
