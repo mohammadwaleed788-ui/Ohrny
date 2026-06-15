@@ -1,5 +1,5 @@
 import cron from 'node-cron'
-import { deactivateExpiredBoosts, grantWeeklyPlatinBoosts, seedSubscriptionCatalog } from '../services/entitlementService.js'
+import { deactivateExpiredBoosts, grantWeeklyPlatinBoosts, grantWeeklySuperLikes, seedSubscriptionCatalog } from '../services/entitlementService.js'
 
 export function startSubscriptionJobs() {
   seedSubscriptionCatalog()
@@ -17,6 +17,12 @@ export function startSubscriptionJobs() {
     } catch (err) {
       console.error('[subscription-jobs] Weekly boost grant error:', err.message)
     }
+    try {
+      await grantWeeklySuperLikes()
+      console.log(`[subscription-jobs] Weekly Super Likes granted at ${new Date().toISOString()}`)
+    } catch (err) {
+      console.error('[subscription-jobs] Weekly Super Like grant error:', err.message)
+    }
   }, { timezone: 'UTC' })
 
   cron.schedule('*/5 * * * *', async () => {
@@ -30,6 +36,6 @@ export function startSubscriptionJobs() {
     }
   }, { timezone: 'UTC' })
 
-  console.log('[subscription-jobs] Scheduled weekly boost grant Monday 00:00 UTC')
+  console.log('[subscription-jobs] Scheduled weekly boost + Super Like grant Monday 00:00 UTC')
   console.log('[subscription-jobs] Scheduled expired boost cleanup every 5 minutes')
 }

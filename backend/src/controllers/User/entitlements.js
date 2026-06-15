@@ -1,4 +1,50 @@
-import { getActiveSubscriptionProductsGrouped, getEffectiveEntitlements } from '../../services/entitlementService.js'
+import {
+  getActiveSubscriptionProductsGrouped,
+  getEffectiveEntitlements,
+  grantPurchase,
+  normalizeConsumableProduct,
+} from '../../services/entitlementService.js'
+
+// Client-confirm fallback for one-time purchases (Boosts / Super Likes). The
+// app calls this right after a successful RevenueCat purchase so the balance is
+// credited immediately instead of waiting on the async webhook (which can lag
+// or, rarely, drop). grantPurchase dedupes by transaction id, so this and the
+// webhook are safe to both run — whichever lands first wins.
+export async function syncConsumablePurchase(req, res) {
+  try {
+    const { productId, transactionId, price, currency, platform } = req.body || {}
+    if (!productId || !transactionId) {
+      return res.status(400).json({ error: 'productId and transactionId are required' })
+    }
+
+    const consumable = normalizeConsumableProduct(productId)
+    if (!consumable) {
+      // Subscriptions are credited by the webhook, not here.
+      return res.json({ ok: true, ignored: 'not_consumable' })
+    }
+
+    const result = await grantPurchase({
+      userId: req.user.id,
+      type: consumable.type,
+      quantity: consumable.quantity,
+      priceAtPurchase: price ?? 0,
+      currency: currency || 'EUR',
+      revenueCatProductId: productId,
+      revenueCatTransactionId: transactionId,
+      platform: platform || 'ios',
+    })
+
+    const entitlements = await getEffectiveEntitlements(req.user.id)
+    return res.json({
+      ok: true,
+      duplicate: Boolean(result.duplicate),
+      entitlements,
+    })
+  } catch (err) {
+    console.error('syncConsumablePurchase error:', err)
+    return res.status(500).json({ error: 'Failed to sync purchase' })
+  }
+}
 
 export async function getEntitlements(req, res) {
   try {

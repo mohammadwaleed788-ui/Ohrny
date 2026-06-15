@@ -2,6 +2,7 @@ import { eq, and } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { userPhotos } from '../../../db/schema/users.js'
 import { deleteS3Object } from '../../utils/s3.js'
+import { recomputeProfileCompletion } from '../../services/profileCompletion.js'
 
 export async function deletePhoto(req, res) {
   try {
@@ -30,6 +31,9 @@ export async function deletePhoto(req, res) {
     await db
       .delete(userPhotos)
       .where(and(eq(userPhotos.id, id), eq(userPhotos.userId, userId)))
+
+    // Fewer photos → lower completion; keep the badge/filter accurate.
+    await recomputeProfileCompletion(userId)
 
     return res.json({ success: true })
   } catch (err) {

@@ -7,7 +7,8 @@ import { blocks } from '../../../db/schema/safety.js'
 import { userBoosts } from '../../../db/schema/subscriptions.js'
 import { notifyNewLike, notifyNewMatch } from '../../services/notifications/likeNotification.js'
 import { attachUsersToMatchRoom, emitToUser } from '../../socket/index.js'
-import { assertCanSwipe, consumeSwipe, getEffectiveEntitlements } from '../../services/entitlementService.js'
+import { assertCanSwipe, assertFeature, consumeSwipe, getEffectiveEntitlements } from '../../services/entitlementService.js'
+import { VERIFIED_MIN_PCT } from '../../services/profileCompletion.js'
 import { decodeDiscoverCursor, encodeDiscoverCursor } from './discoverCursor.js'
 
 const DEFAULT_LIMIT = 20
@@ -176,7 +177,9 @@ export async function getDiscoverCards(req, res) {
       )`,
     ]
     if (verifiedOnly) {
-      baseWhereParts.push(eq(users.idVerified, true))
+      // "Verified" = a fully-complete profile (we OTP every signup, so there's
+      // no separate ID-verification step — completeness is the trust signal).
+      baseWhereParts.push(sql`coalesce(${users.profileCompletePct}, 0) >= ${VERIFIED_MIN_PCT}`)
     }
     if (advancedCompatibility) {
       baseWhereParts.push(sql`coalesce(${users.profileCompletePct}, 0) >= 40`)
@@ -304,7 +307,7 @@ export async function getDiscoverCards(req, res) {
         bio: users.bio,
         aboutMe: users.aboutMe,
         city: users.city,
-        verified: users.idVerified,
+        verified: sql`coalesce(${users.profileCompletePct}, 0) >= ${VERIFIED_MIN_PCT}`,
         distanceMiles: distanceSelectSql,
         boostRank: boostedOrderSql,
         compatRank: advancedCompatibility ? compatibilityOrderSql : sql`null`,
@@ -601,6 +604,78 @@ export async function swipeDiscoverCard(req, res) {
   }
 }
 
+// Rewind (undo) the user's most recent swipe. Plus-and-above feature, unlimited
+// uses. Refunds the swipe count (and the Super Like, if it was one), removes the
+// swipe row so the profile re-enters the deck, and — if that swipe had just
+// formed a match — deactivates it (it's no longer mutual) and tells the other
+// user. The app restores the previous card locally.
+export async function rewindLastSwipe(req, res) {
+  try {
+    const userId = req.user.id
+    const access = await assertFeature(userId, 'rewindLastSwipe')
+    if (!access.ok) return res.status(access.status).json(access.body)
+
+    const [last] = await db
+      .select({
+        id: likes.id,
+        toUserId: likes.toUserId,
+        type: likes.type,
+        matchId: likes.matchId,
+      })
+      .from(likes)
+      .where(
+        and(
+          eq(likes.fromUserId, userId),
+          inArray(likes.type, ['like', 'super_like', 'pass']),
+        ),
+      )
+      .orderBy(desc(likes.createdAt), desc(likes.id))
+      .limit(1)
+
+    if (!last) return res.status(404).json({ error: 'no_swipe_to_rewind' })
+
+    await db.transaction(async (tx) => {
+      await tx.delete(likes).where(eq(likes.id, last.id))
+
+      if (last.matchId) {
+        await tx
+          .update(matches)
+          .set({
+            isActive: false,
+            unmatchedAt: new Date(),
+            unmatchedByUserId: userId,
+            updatedAt: new Date(),
+          })
+          .where(eq(matches.id, last.matchId))
+      }
+
+      const updates = {
+        updatedAt: new Date(),
+        swipesUsedToday: sql`greatest(${users.swipesUsedToday} - 1, 0)`,
+      }
+      if (last.type === 'super_like') {
+        updates.superLikesLeft = sql`${users.superLikesLeft} + 1`
+      }
+      await tx.update(users).set(updates).where(eq(users.id, userId))
+    })
+
+    // If we tore down a just-formed match, let the other device drop it.
+    if (last.matchId) {
+      emitToUser(last.toUserId, 'match:removed', { matchId: last.matchId })
+    }
+
+    return res.json({
+      ok: true,
+      toUserId: last.toUserId,
+      type: last.type,
+      unmatched: Boolean(last.matchId),
+    })
+  } catch (err) {
+    console.error('rewindLastSwipe error:', err)
+    return res.status(500).json({ error: 'Failed to rewind' })
+  }
+}
+
 export async function getUserProfile(req, res) {
   try {
     const viewerId = req.user.id
@@ -632,7 +707,7 @@ export async function getUserProfile(req, res) {
         bio: users.bio,
         aboutMe: users.aboutMe,
         city: users.city,
-        verified: users.idVerified,
+        verified: sql`coalesce(${users.profileCompletePct}, 0) >= ${VERIFIED_MIN_PCT}`,
         latApprox: users.latApprox,
         lngApprox: users.lngApprox,
         isBanned: users.isBanned,

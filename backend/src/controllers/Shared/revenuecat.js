@@ -7,20 +7,11 @@ import {
   PLAN_ORDER,
   findSubscriptionProductByRevenueCatId,
   grantPurchase,
+  normalizeConsumableProduct,
   seedSubscriptionCatalog,
   syncUserPlanCache,
+  topUpSuperLikesForPlan,
 } from '../../services/entitlementService.js'
-
-// Ordered LARGEST-first: `super.*5` also matches "15"/"30", so the bigger,
-// more-specific packs must be tested before the smaller ones.
-const PURCHASE_PACKS = [
-  { match: /super.*30|30.*super/i, type: 'super_likes', quantity: 30 },
-  { match: /super.*15|15.*super/i, type: 'super_likes', quantity: 15 },
-  { match: /super.*5|5.*super/i, type: 'super_likes', quantity: 5 },
-  { match: /boost.*10|10.*boost/i, type: 'boosts', quantity: 10 },
-  { match: /boost.*5|5.*boost/i, type: 'boosts', quantity: 5 },
-  { match: /boost.*1|1.*boost/i, type: 'boosts', quantity: 1 },
-]
 
 function eventFromPayload(payload) {
   return payload?.event || payload
@@ -31,11 +22,6 @@ function normalizePlatform(value) {
   if (raw.includes('android') || raw.includes('play')) return 'android'
   if (raw.includes('web')) return 'web'
   return 'ios'
-}
-
-function normalizePurchase(productId) {
-  const raw = String(productId || '')
-  return PURCHASE_PACKS.find((pack) => pack.match.test(raw)) || null
 }
 
 function normalizeStatus(eventType) {
@@ -110,7 +96,7 @@ export async function handleRevenueCatWebhook(req, res) {
     const currency = event.currency || event.currency_code || 'EUR'
     const purchasedAt = dateFromMs(event.purchased_at_ms) || dateFromMs(event.event_timestamp_ms) || new Date()
 
-    const consumable = normalizePurchase(productId)
+    const consumable = normalizeConsumableProduct(productId)
     if (consumable) {
       const result = await grantPurchase({
         userId: user.id,
@@ -191,6 +177,11 @@ export async function handleRevenueCatWebhook(req, res) {
       }
 
       await syncUserPlanCache(user.id, tx)
+      // Give a new/renewing subscriber their weekly Super Likes immediately
+      // (the cron then refreshes them every Monday).
+      if (status === 'active' || status === 'grace_period') {
+        await topUpSuperLikesForPlan(user.id, tx)
+      }
     })
 
     return res.json({ ok: true, type: 'subscription', plan: planId, status })

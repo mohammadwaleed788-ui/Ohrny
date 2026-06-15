@@ -24,6 +24,7 @@ import { normalizePhoneE164 } from '../../utils/phone.js'
 import { resolveOtpProvider, sendOtpWithProvider, verifyOtpWithProvider } from '../../services/otp/provider.js'
 import { getIO } from '../../socket/index.js'
 import { assertFeature, getEffectiveEntitlements } from '../../services/entitlementService.js'
+import { recomputeProfileCompletion } from '../../services/profileCompletion.js'
 
 async function loadUserDetails(userId) {
   const [account] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
@@ -542,6 +543,8 @@ export async function completeOnboarding(req, res) {
       return [inserted]
     })
 
+    // Replace the optimistic 100 with the real completion of what they filled.
+    await recomputeProfileCompletion(created.id)
     const tokens = await issueTokens(created.id)
     return res.status(201).json({
       flow: 'signup_completed',
@@ -735,6 +738,10 @@ export async function updateProfile(req, res) {
           )
         }
       }
+
+      // Recompute completion from the freshly-written profile (drives the
+      // "verified"/complete badge + the verified-only discovery filter).
+      await recomputeProfileCompletion(userId, tx)
     })
 
     const updated = await loadUserDetails(userId)

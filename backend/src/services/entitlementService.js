@@ -519,6 +519,8 @@ export async function getEffectiveEntitlements(userId, client = db) {
   const features = {}
   for (const key of FEATURE_KEYS) features[key] = Boolean(plan[key])
   features.verifiedOnly = planRank(plan.id) >= planRank('plus')
+  // Rewind last swipe — any paid plan (Plus and above).
+  features.rewindLastSwipe = planRank(plan.id) >= planRank('plus')
 
   return {
     plan: plan.id,
@@ -734,6 +736,23 @@ export async function deactivateExpiredBoosts(client = db) {
   return updated.length
 }
 
+// Maps a store product id → consumable grant. Ordered LARGEST-first because
+// `super.*5` also matches "15"/"30". Shared by the RevenueCat webhook AND the
+// client-confirm endpoint so both credit identically.
+const CONSUMABLE_PACKS = [
+  { match: /super.*30|30.*super/i, type: 'super_likes', quantity: 30 },
+  { match: /super.*15|15.*super/i, type: 'super_likes', quantity: 15 },
+  { match: /super.*5|5.*super/i, type: 'super_likes', quantity: 5 },
+  { match: /boost.*10|10.*boost/i, type: 'boosts', quantity: 10 },
+  { match: /boost.*5|5.*boost/i, type: 'boosts', quantity: 5 },
+  { match: /boost.*1|1.*boost/i, type: 'boosts', quantity: 1 },
+]
+
+export function normalizeConsumableProduct(productId) {
+  const raw = String(productId || '')
+  return CONSUMABLE_PACKS.find((pack) => pack.match.test(raw)) || null
+}
+
 export async function grantPurchase({
   userId,
   type,
@@ -787,6 +806,44 @@ export async function syncUserPlanCache(userId, client = db) {
   const plan = activeSubscription?.planId || 'free'
   await client.update(users).set({ plan, updatedAt: new Date() }).where(eq(users.id, userId))
   return plan
+}
+
+// Weekly Super Like allowance per plan (Plus = 5, Platin/Private = 10). Tops up
+// each paid user TO their allowance — never reduces, so purchased Super Likes
+// are preserved and re-running is harmless (GREATEST is idempotent).
+export async function grantWeeklySuperLikes(client = db) {
+  const now = new Date()
+  for (const [planId, cfg] of Object.entries(DEFAULT_PLAN_CONFIGS)) {
+    const allowance = Number(cfg.superLikesPerWeek || 0)
+    if (allowance <= 0) continue
+    await client
+      .update(users)
+      .set({
+        superLikesLeft: sql`greatest(${users.superLikesLeft}, ${allowance})`,
+        updatedAt: now,
+      })
+      .where(eq(users.plan, planId))
+  }
+}
+
+// Top up one user's Super Likes to their plan allowance (used on subscribe so a
+// new subscriber gets their weekly Super Likes immediately, not next Monday).
+export async function topUpSuperLikesForPlan(userId, client = db) {
+  const [u] = await client
+    .select({ plan: users.plan })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+  if (!u) return
+  const allowance = Number(DEFAULT_PLAN_CONFIGS[u.plan]?.superLikesPerWeek || 0)
+  if (allowance <= 0) return
+  await client
+    .update(users)
+    .set({
+      superLikesLeft: sql`greatest(${users.superLikesLeft}, ${allowance})`,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId))
 }
 
 export async function grantWeeklyPlatinBoosts(client = db) {
