@@ -222,24 +222,28 @@ export async function getDiscoverCards(req, res) {
 
     const hasPremium = entitlements?.plan && entitlements.plan !== 'free'
     if (hasPremium) {
-      const targetHeightCmSql = sql`(
-        CASE
-          WHEN ${userLifestyle.height} ~* '^[0-9]+\\s*cm' THEN
-            CAST(substring(${userLifestyle.height} from '^[0-9]+') AS integer)
-          WHEN ${userLifestyle.height} ~ '^[0-9][''’][0-9]+' THEN
-            ROUND(
-              CAST(substring(${userLifestyle.height} from '^([0-9]+)[''’]') AS integer) * 30.48 +
-              CAST(substring(${userLifestyle.height} from '[''’]([0-9]+)') AS integer) * 2.54
-            )
-          ELSE NULL
-        END
-      )`
-
-      const hMin = prefs.heightMin !== undefined ? Number(prefs.heightMin) : 140
-      const hMax = prefs.heightMax !== undefined ? Number(prefs.heightMax) : 220
-      baseWhereParts.push(
-        sql`(${targetHeightCmSql} IS NULL OR (${targetHeightCmSql} >= ${hMin} AND ${targetHeightCmSql} <= ${hMax}))`
-      )
+      const hMin = clampInt(prefs.heightMin, 140, 220, 140)
+      const hMax = clampInt(prefs.heightMax, 140, 220, 220)
+      // Only run the per-row height parse when the range is actually narrowed —
+      // a full 140–220 range matches everyone, so skip the regex work entirely.
+      if (hMin > 140 || hMax < 220) {
+        const targetHeightCmSql = sql`(
+          CASE
+            WHEN ${userLifestyle.height} ~* '^[0-9]+\\s*cm' THEN
+              CAST(substring(${userLifestyle.height} from '^[0-9]+') AS integer)
+            WHEN ${userLifestyle.height} ~ '^[0-9][''’][0-9]+' THEN
+              ROUND(
+                CAST(substring(${userLifestyle.height} from '^([0-9]+)[''’]') AS integer) * 30.48 +
+                CAST(substring(${userLifestyle.height} from '[''’]([0-9]+)') AS integer) * 2.54
+              )
+            ELSE NULL
+          END
+        )`
+        // Null-lenient: candidates who haven't set a height are still shown.
+        baseWhereParts.push(
+          sql`(${targetHeightCmSql} IS NULL OR (${targetHeightCmSql} >= ${hMin} AND ${targetHeightCmSql} <= ${hMax}))`,
+        )
+      }
 
       const lifestyleArrays = {
         diet: userLifestyle.diet,
@@ -256,7 +260,11 @@ export async function getDiscoverCards(req, res) {
       for (const [key, column] of Object.entries(lifestyleArrays)) {
         const filterVals = prefs[key]
         if (Array.isArray(filterVals) && filterVals.length > 0) {
-          baseWhereParts.push(inArray(column, filterVals))
+          // Null-lenient (same as the height filter): show people who match the
+          // selected values AND those who left this field blank — only exclude
+          // explicit mismatches. Excluding everyone who skipped an optional
+          // field would empty the deck.
+          baseWhereParts.push(sql`(${column} IS NULL OR ${inArray(column, filterVals)})`)
         }
       }
     }
