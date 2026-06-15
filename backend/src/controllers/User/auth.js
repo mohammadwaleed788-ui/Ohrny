@@ -30,7 +30,9 @@ async function loadUserDetails(userId) {
   const [account] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!account) return null
 
-  const [lifestyle, privacySettings, discoverPreferences, photos, prompts, interests, devices, entitlements] = await Promise.all([
+  const entitlements = await getEffectiveEntitlements(userId)
+
+  const [lifestyle, privacySettings, discoverPreferences, photos, prompts, interests, devices] = await Promise.all([
     db.select().from(userLifestyle).where(eq(userLifestyle.userId, userId)).limit(1).then((rows) => rows[0] || null),
     db.select().from(userPrivacySettings).where(eq(userPrivacySettings.userId, userId)).limit(1).then((rows) => rows[0] || null),
     db.select().from(userDiscoverPreferences).where(eq(userDiscoverPreferences.userId, userId)).limit(1).then((rows) => rows[0] || null),
@@ -38,7 +40,6 @@ async function loadUserDetails(userId) {
     db.select().from(userPrompts).where(eq(userPrompts.userId, userId)),
     db.select().from(userInterests).where(eq(userInterests.userId, userId)),
     db.select().from(userDevices).where(eq(userDevices.userId, userId)),
-    getEffectiveEntitlements(userId),
   ])
 
   return {

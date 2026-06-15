@@ -10,6 +10,7 @@ import {
   inAppPurchases,
   userBoosts,
 } from '../../db/schema/subscriptions.js'
+import { userDiscoverPreferences } from '../../db/schema/settings.js'
 
 export const PLAN_ORDER = ['free', 'plus', 'platin', 'private']
 export const DURATION_ORDER = ['1w', '1m', '3m', '6m']
@@ -509,6 +510,53 @@ export async function getEffectiveEntitlements(userId, client = db) {
       .update(users)
       .set({ plan: planId, updatedAt: new Date() })
       .where(eq(users.id, userId))
+  }
+
+  // Self-heal preferences if subscription is expired/free
+  if (planId === 'free' && client === db) {
+    await client
+      .update(userDiscoverPreferences)
+      .set({
+        verifiedOnly: false,
+        advancedCompatibility: false,
+        travelMode: false,
+        globalMode: false,
+        heightMin: 140,
+        heightMax: 220,
+        heightUnit: 'cm',
+        diet: [],
+        drinks: [],
+        smokes: [],
+        exercise: [],
+        kids: [],
+        pets: [],
+        education: [],
+        religion: [],
+        zodiac: [],
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(userDiscoverPreferences.userId, userId),
+          or(
+            eq(userDiscoverPreferences.verifiedOnly, true),
+            eq(userDiscoverPreferences.advancedCompatibility, true),
+            eq(userDiscoverPreferences.travelMode, true),
+            eq(userDiscoverPreferences.globalMode, true),
+            sql`${userDiscoverPreferences.heightMin} <> 140`,
+            sql`${userDiscoverPreferences.heightMax} <> 220`,
+            sql`${userDiscoverPreferences.diet} <> '{}'::text[]`,
+            sql`${userDiscoverPreferences.drinks} <> '{}'::text[]`,
+            sql`${userDiscoverPreferences.smokes} <> '{}'::text[]`,
+            sql`${userDiscoverPreferences.exercise} <> '{}'::text[]`,
+            sql`${userDiscoverPreferences.kids} <> '{}'::text[]`,
+            sql`${userDiscoverPreferences.pets} <> '{}'::text[]`,
+            sql`${userDiscoverPreferences.education} <> '{}'::text[]`,
+            sql`${userDiscoverPreferences.religion} <> '{}'::text[]`,
+            sql`${userDiscoverPreferences.zodiac} <> '{}'::text[]`
+          )
+        )
+      )
   }
   const plan = activeSubscription?.plan
     ? rowToPlanConfig(activeSubscription.plan, planId)
