@@ -1,7 +1,7 @@
 import {
-  pgTable, uuid, boolean, smallint, timestamp, index,
+  pgTable, uuid, boolean, smallint, timestamp, index, text, varchar,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import { users } from './users.js';
 import { discoverRelTypeEnum } from './enums.js';
 
@@ -58,6 +58,21 @@ export const userDiscoverPreferences = pgTable('user_discover_preferences', {
   advancedCompatibility:  boolean('advanced_compatibility').notNull().default(false),
   travelMode:             boolean('travel_mode').notNull().default(false),
   globalMode:             boolean('global_mode').notNull().default(false),
+
+  // ── Advanced Filters (gated by plus/platin plan) ─────────────────────────
+  heightMin:              smallint('height_min').notNull().default(140),
+  heightMax:              smallint('height_max').notNull().default(220),
+  heightUnit:             varchar('height_unit', { length: 4 }).notNull().default('cm'),
+
+  diet:                   text('diet').array().notNull().default(sql`'{}'::text[]`),
+  drinks:                 text('drinks').array().notNull().default(sql`'{}'::text[]`),
+  smokes:                 text('smokes').array().notNull().default(sql`'{}'::text[]`),
+  exercise:               text('exercise').array().notNull().default(sql`'{}'::text[]`),
+  kids:                   text('kids').array().notNull().default(sql`'{}'::text[]`),
+  pets:                   text('pets').array().notNull().default(sql`'{}'::text[]`),
+  education:              text('education').array().notNull().default(sql`'{}'::text[]`),
+  religion:               text('religion').array().notNull().default(sql`'{}'::text[]`),
+  zodiac:                 text('zodiac').array().notNull().default(sql`'{}'::text[]`),
 
   updatedAt:              timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

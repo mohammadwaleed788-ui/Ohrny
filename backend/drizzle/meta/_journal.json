@@ -64,6 +64,13 @@
       "when": 1781273653061,
       "tag": "0008_tidy_speed_demon",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781524497292,
+      "tag": "0009_solid_roulette",
+      "breakpoints": true
     }
   ]
 }

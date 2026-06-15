@@ -96,6 +96,18 @@ export async function getDiscoverCards(req, res) {
         advancedCompatibility: userDiscoverPreferences.advancedCompatibility,
         travelMode: userDiscoverPreferences.travelMode,
         globalMode: userDiscoverPreferences.globalMode,
+        heightMin: userDiscoverPreferences.heightMin,
+        heightMax: userDiscoverPreferences.heightMax,
+        heightUnit: userDiscoverPreferences.heightUnit,
+        diet: userDiscoverPreferences.diet,
+        drinks: userDiscoverPreferences.drinks,
+        smokes: userDiscoverPreferences.smokes,
+        exercise: userDiscoverPreferences.exercise,
+        kids: userDiscoverPreferences.kids,
+        pets: userDiscoverPreferences.pets,
+        education: userDiscoverPreferences.education,
+        religion: userDiscoverPreferences.religion,
+        zodiac: userDiscoverPreferences.zodiac,
       })
       .from(userDiscoverPreferences)
       .where(sql`${userDiscoverPreferences.userId} = ${req.user.id}`)
@@ -208,6 +220,47 @@ export async function getDiscoverCards(req, res) {
       }
     }
 
+    const hasPremium = entitlements?.plan && entitlements.plan !== 'free'
+    if (hasPremium) {
+      const targetHeightCmSql = sql`(
+        CASE
+          WHEN ${userLifestyle.height} ~* '^[0-9]+\\s*cm' THEN
+            CAST(substring(${userLifestyle.height} from '^[0-9]+') AS integer)
+          WHEN ${userLifestyle.height} ~ '^[0-9][''’][0-9]+' THEN
+            ROUND(
+              CAST(substring(${userLifestyle.height} from '^([0-9]+)[''’]') AS integer) * 30.48 +
+              CAST(substring(${userLifestyle.height} from '[''’]([0-9]+)') AS integer) * 2.54
+            )
+          ELSE NULL
+        END
+      )`
+
+      const hMin = prefs.heightMin !== undefined ? Number(prefs.heightMin) : 140
+      const hMax = prefs.heightMax !== undefined ? Number(prefs.heightMax) : 220
+      baseWhereParts.push(
+        sql`(${targetHeightCmSql} IS NULL OR (${targetHeightCmSql} >= ${hMin} AND ${targetHeightCmSql} <= ${hMax}))`
+      )
+
+      const lifestyleArrays = {
+        diet: userLifestyle.diet,
+        drinks: userLifestyle.drinks,
+        smokes: userLifestyle.smokes,
+        exercise: userLifestyle.exercise,
+        kids: userLifestyle.kids,
+        pets: userLifestyle.pets,
+        education: userLifestyle.education,
+        religion: userLifestyle.religion,
+        zodiac: userLifestyle.zodiac,
+      }
+
+      for (const [key, column] of Object.entries(lifestyleArrays)) {
+        const filterVals = prefs[key]
+        if (Array.isArray(filterVals) && filterVals.length > 0) {
+          baseWhereParts.push(inArray(column, filterVals))
+        }
+      }
+    }
+
     // Full query = base + swipe-history exclusion + cursor
     const whereParts = [...baseWhereParts]
 
@@ -313,6 +366,7 @@ export async function getDiscoverCards(req, res) {
         compatRank: advancedCompatibility ? compatibilityOrderSql : sql`null`,
       })
       .from(users)
+      .leftJoin(userLifestyle, eq(users.id, userLifestyle.userId))
       .where(sql.join(whereParts, sql` and `))
       .orderBy(...orderByClause)
       .limit(limit + 1)
@@ -326,6 +380,7 @@ export async function getDiscoverCards(req, res) {
       const anyMatch = await db
         .select({ id: users.id })
         .from(users)
+        .leftJoin(userLifestyle, eq(users.id, userLifestyle.userId))
         .where(sql.join(baseWhereParts, sql` and `))
         .limit(1)
       return res.json({

@@ -808,6 +808,9 @@ export async function updatePrivacy(req, res) {
 export async function updatePreferences(req, res) {
   try {
     const userId = req.user.id
+    const premiumAccess = await assertFeature(userId, 'advancedCompatibility')
+    const hasPremium = premiumAccess.ok
+
     const {
       maxDistance,
       minDistance,
@@ -819,6 +822,18 @@ export async function updatePreferences(req, res) {
       advancedCompatibility,
       travelMode,
       globalMode,
+      heightMin,
+      heightMax,
+      heightUnit,
+      diet,
+      drinks,
+      smokes,
+      exercise,
+      kids,
+      pets,
+      education,
+      religion,
+      zodiac,
     } = req.body || {}
 
     const prefUpdates = {}
@@ -842,6 +857,23 @@ export async function updatePreferences(req, res) {
     if (photoBlurVisibility !== undefined && !Number.isNaN(Number(photoBlurVisibility))) {
       prefUpdates.photoBlurVisibility = Math.max(0, Math.min(100, Math.round(Number(photoBlurVisibility))))
     }
+    if (heightMin !== undefined) {
+      prefUpdates.heightMin = hasPremium && !Number.isNaN(Number(heightMin)) ? Math.max(140, Math.min(220, Math.round(Number(heightMin)))) : 140
+    }
+    if (heightMax !== undefined) {
+      prefUpdates.heightMax = hasPremium && !Number.isNaN(Number(heightMax)) ? Math.max(140, Math.min(220, Math.round(Number(heightMax)))) : 220
+    }
+    if (heightUnit !== undefined) {
+      prefUpdates.heightUnit = hasPremium ? String(heightUnit) : 'cm'
+    }
+
+    const arrayFilters = { diet, drinks, smokes, exercise, kids, pets, education, religion, zodiac }
+    for (const [key, val] of Object.entries(arrayFilters)) {
+      if (val !== undefined) {
+        prefUpdates[key] = hasPremium && Array.isArray(val) ? val.map(x => String(x)) : []
+      }
+    }
+
     const paidFilters = {
       verifiedOnly: { value: verifiedOnly, feature: 'verifiedOnly' },
       advancedCompatibility: { value: advancedCompatibility, feature: 'advancedCompatibility' },
