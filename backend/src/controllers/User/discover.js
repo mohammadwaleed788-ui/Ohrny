@@ -234,8 +234,8 @@ export async function getDiscoverCards(req, res) {
       }
     }
 
-    const hasPremium = entitlements?.plan && entitlements.plan !== 'free'
-    if (hasPremium) {
+    // Height + lifestyle filters are FREE for everyone now (no plan gating).
+    {
       const hMin = clampInt(prefs.heightMin, 140, 220, 140)
       const hMax = clampInt(prefs.heightMax, 140, 220, 220)
       // Only run the per-row height parse when the range is actually narrowed —

@@ -861,20 +861,21 @@ export async function updatePreferences(req, res) {
     if (photoBlurVisibility !== undefined && !Number.isNaN(Number(photoBlurVisibility))) {
       prefUpdates.photoBlurVisibility = Math.max(0, Math.min(100, Math.round(Number(photoBlurVisibility))))
     }
-    if (heightMin !== undefined) {
-      prefUpdates.heightMin = hasPremium && !Number.isNaN(Number(heightMin)) ? Math.max(140, Math.min(220, Math.round(Number(heightMin)))) : 140
+    // Height + lifestyle are FREE filters now — saved for everyone (no gating).
+    if (heightMin !== undefined && !Number.isNaN(Number(heightMin))) {
+      prefUpdates.heightMin = Math.max(140, Math.min(220, Math.round(Number(heightMin))))
     }
-    if (heightMax !== undefined) {
-      prefUpdates.heightMax = hasPremium && !Number.isNaN(Number(heightMax)) ? Math.max(140, Math.min(220, Math.round(Number(heightMax)))) : 220
+    if (heightMax !== undefined && !Number.isNaN(Number(heightMax))) {
+      prefUpdates.heightMax = Math.max(140, Math.min(220, Math.round(Number(heightMax))))
     }
     if (heightUnit !== undefined) {
-      prefUpdates.heightUnit = hasPremium ? String(heightUnit) : 'cm'
+      prefUpdates.heightUnit = ['cm', 'ft'].includes(String(heightUnit)) ? String(heightUnit) : 'cm'
     }
 
     const arrayFilters = { diet, drinks, smokes, exercise, kids, pets, education, religion, zodiac }
     for (const [key, val] of Object.entries(arrayFilters)) {
       if (val !== undefined) {
-        prefUpdates[key] = hasPremium && Array.isArray(val) ? val.map(x => String(x)) : []
+        prefUpdates[key] = Array.isArray(val) ? val.map((x) => String(x).slice(0, 60)) : []
       }
     }
 
