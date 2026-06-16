@@ -71,6 +71,13 @@
       "when": 1781524497292,
       "tag": "0009_solid_roulette",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781603952674,
+      "tag": "0010_complex_blade",
+      "breakpoints": true
     }
   ]
 }

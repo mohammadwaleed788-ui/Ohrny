@@ -95,6 +95,8 @@ export async function getDiscoverCards(req, res) {
         verifiedOnly: userDiscoverPreferences.verifiedOnly,
         advancedCompatibility: userDiscoverPreferences.advancedCompatibility,
         travelMode: userDiscoverPreferences.travelMode,
+        travelLat: userDiscoverPreferences.travelLat,
+        travelLng: userDiscoverPreferences.travelLng,
         globalMode: userDiscoverPreferences.globalMode,
         heightMin: userDiscoverPreferences.heightMin,
         heightMax: userDiscoverPreferences.heightMax,
@@ -150,10 +152,20 @@ export async function getDiscoverCards(req, res) {
         : typeof v === 'string' && coordRe.test(v.trim())
           ? Number(v)
           : null
-    const vLatNum = parseCoord(currentUser.latApprox)
-    const vLngNum = parseCoord(currentUser.lngApprox)
+
+    // Travel mode (a.k.a. Passport): when on + entitled + a pin is set, the
+    // search centers on the chosen city instead of the user's real GPS.
+    const travelLatNum = parseCoord(prefs.travelLat)
+    const travelLngNum = parseCoord(prefs.travelLng)
+    const traveling = travelMode && travelLatNum != null && travelLngNum != null
+    const selfLatNum = parseCoord(currentUser.latApprox)
+    const selfLngNum = parseCoord(currentUser.lngApprox)
+
+    // The center used for distance maths — travel pin if traveling, else GPS.
+    const vLatNum = traveling ? travelLatNum : selfLatNum
+    const vLngNum = traveling ? travelLngNum : selfLngNum
     const hasSelfLocation = vLatNum != null && vLngNum != null
-    // Distance filtering only when local (non-global) AND we know where we are.
+    // Distance filtering when we have a center AND we're not in global mode.
     const distanceMode = !globalMode && hasSelfLocation
 
     const safeLat = sql`CASE WHEN ${users.latApprox} ~ ${latPattern} THEN CAST(${users.latApprox} AS double precision) END`
@@ -169,8 +181,10 @@ export async function getDiscoverCards(req, res) {
       )
     )`
     const distanceMilesSql = sql`(${distanceMetersSql} / 1609.344)`
-    const minMeters = (travelMode ? 0 : safeMinDistance) * 1609.344
-    const maxMeters = (travelMode ? Math.max(maxDistance, 500) : maxDistance) * 1609.344
+    // Travel mode now re-centers the search (above), so distance uses the
+    // user's normal radius around the chosen city — no more radius widening.
+    const minMeters = safeMinDistance * 1609.344
+    const maxMeters = maxDistance * 1609.344
 
     // Base conditions shared by both the main query and the exhausted check.
     // Does NOT include swipe-history exclusion or cursor so we can reuse it.

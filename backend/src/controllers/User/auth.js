@@ -822,6 +822,9 @@ export async function updatePreferences(req, res) {
       verifiedOnly,
       advancedCompatibility,
       travelMode,
+      travelLat,
+      travelLng,
+      travelCity,
       globalMode,
       heightMin,
       heightMax,
@@ -892,6 +895,23 @@ export async function updatePreferences(req, res) {
         if (!access.ok) enabled = false
       }
       prefUpdates[field] = enabled
+    }
+
+    // Travel-mode location (the Passport pin). Only entitled users (travelMode
+    // is plus+) can set it; for everyone else it's cleared. Coords are stored
+    // as strings, validated numeric (the discovery query re-guards them too).
+    const toCoord = (v) => {
+      const n = Number(v)
+      return Number.isFinite(n) ? String(n) : null
+    }
+    if (travelLat !== undefined) {
+      prefUpdates.travelLat = hasPremium ? toCoord(travelLat) : null
+    }
+    if (travelLng !== undefined) {
+      prefUpdates.travelLng = hasPremium ? toCoord(travelLng) : null
+    }
+    if (travelCity !== undefined) {
+      prefUpdates.travelCity = hasPremium && travelCity ? String(travelCity).slice(0, 120) : null
     }
 
     await db.transaction(async (tx) => {

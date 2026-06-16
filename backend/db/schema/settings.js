@@ -59,6 +59,13 @@ export const userDiscoverPreferences = pgTable('user_discover_preferences', {
   travelMode:             boolean('travel_mode').notNull().default(false),
   globalMode:             boolean('global_mode').notNull().default(false),
 
+  // ── Travel mode location (the "Passport" pin) ──────────────────────────────
+  // When travelMode is on, discovery centers on these coords instead of the
+  // user's real GPS. Stored as varchar like users.latApprox/lngApprox.
+  travelLat:              varchar('travel_lat', { length: 32 }),
+  travelLng:              varchar('travel_lng', { length: 32 }),
+  travelCity:             varchar('travel_city', { length: 120 }),
+
   // ── Advanced Filters (gated by plus/platin plan) ─────────────────────────
   heightMin:              smallint('height_min').notNull().default(140),
   heightMax:              smallint('height_max').notNull().default(220),
@@ -76,6 +83,20 @@ export const userDiscoverPreferences = pgTable('user_discover_preferences', {
 
   updatedAt:              timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ─── user_travel_locations ──────────────────────────────────────────────────
+// Platin "saved places" — favorite travel cities the user can quick-switch
+// between. Plus users use only the single active location on the prefs row.
+export const userTravelLocations = pgTable('user_travel_locations', {
+  id:        uuid('id').primaryKey().defaultRandom(),
+  userId:    uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  lat:       varchar('lat', { length: 32 }).notNull(),
+  lng:       varchar('lng', { length: 32 }).notNull(),
+  city:      varchar('city', { length: 120 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  userIdx: index('travel_loc_user_idx').on(t.userId),
+}));
 
 // ─── Relations ────────────────────────────────────────────────────────────────
 export const userPrivacySettingsRelations = relations(userPrivacySettings, ({ one }) => ({

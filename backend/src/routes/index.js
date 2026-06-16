@@ -16,6 +16,7 @@ import memberActivityRoutes from './User/activity.js'
 import memberSafetyRoutes from './User/safety.js'
 import memberEntitlementRoutes from './User/entitlements.js'
 import memberBoostRoutes from './User/boosts.js'
+import memberTravelRoutes from './User/travel.js'
 import revenueCatRoutes from './Shared/revenuecat.js'
 
 const router = Router()
@@ -36,6 +37,7 @@ router.use('/user', memberActivityRoutes)
 router.use('/user', memberSafetyRoutes)
 router.use('/user', memberEntitlementRoutes)
 router.use('/user', memberBoostRoutes)
+router.use('/user', memberTravelRoutes)
 router.use('/user/devices', memberDeviceRoutes)
 router.use('/user/photos', memberPhotoRoutes)
 
