@@ -569,6 +569,9 @@ export async function getEffectiveEntitlements(userId, client = db) {
   features.verifiedOnly = planRank(plan.id) >= planRank('plus')
   // Rewind last swipe — any paid plan (Plus and above).
   features.rewindLastSwipe = planRank(plan.id) >= planRank('plus')
+  // Privacy keepers — hide age / hide distance (Plus and above).
+  features.hideAge = planRank(plan.id) >= planRank('plus')
+  features.hideDistance = planRank(plan.id) >= planRank('plus')
 
   return {
     plan: plan.id,

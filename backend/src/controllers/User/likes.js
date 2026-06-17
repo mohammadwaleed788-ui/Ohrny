@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { likes, matches } from '../../../db/schema/matching.js'
 import { users, userPhotos } from '../../../db/schema/users.js'
+import { userPrivacySettings } from '../../../db/schema/settings.js'
 import { blocks } from '../../../db/schema/safety.js'
 import { notifyNewMatch, notifyPassed } from '../../services/notifications/likeNotification.js'
 import { attachUsersToMatchRoom } from '../../socket/index.js'
@@ -152,6 +153,8 @@ export async function getReceivedLikes(req, res) {
         verified: users.idVerified,
         latApprox: users.latApprox,
         lngApprox: users.lngApprox,
+        hideAge: userPrivacySettings.hideAge,
+        hideDistance: userPrivacySettings.hideDistance,
         mainPhoto: sql`(
           select ${userPhotos.storageKey}
           from ${userPhotos}
@@ -171,6 +174,7 @@ export async function getReceivedLikes(req, res) {
       })
       .from(likes)
       .innerJoin(users, eq(users.id, likes.fromUserId))
+      .leftJoin(userPrivacySettings, eq(userPrivacySettings.userId, users.id))
       .where(and(...whereParts))
       .orderBy(desc(likes.createdAt), desc(likes.id))
       .limit(limit + 1)
@@ -230,10 +234,11 @@ export async function getReceivedLikes(req, res) {
         superLike: isSuperLike,
         // Everyone sees the real card now. Liking back is the gated action.
         handle: row.handle,
-        age: row.age,
+        // Privacy keepers: hidden age/distance don't show in the likes sheet.
+        age: row.hideAge ? null : row.age,
         pronouns: row.pronouns,
         verified: Boolean(row.verified),
-        distanceLabel,
+        distanceLabel: row.hideDistance ? null : distanceLabel,
         mainPhoto: row.mainPhoto,
         // Respect the photo's own blur setting. A like never implies photo
         // unlock — that's a per-match property — so a re-like after unmatch
@@ -455,6 +460,8 @@ export async function getSentLikes(req, res) {
           verified: users.idVerified,
           latApprox: users.latApprox,
           lngApprox: users.lngApprox,
+          hideAge: userPrivacySettings.hideAge,
+          hideDistance: userPrivacySettings.hideDistance,
           mainPhoto: sql`(
             select ${userPhotos.storageKey}
             from ${userPhotos}
@@ -483,6 +490,7 @@ export async function getSentLikes(req, res) {
         .from(likes)
         .innerJoin(users, eq(users.id, likes.toUserId))
         .leftJoin(matches, eq(matches.id, likes.matchId))
+        .leftJoin(userPrivacySettings, eq(userPrivacySettings.userId, users.id))
         .where(and(...whereParts))
         .orderBy(desc(likes.createdAt), desc(likes.id))
         .limit(limit + 1),
@@ -517,10 +525,13 @@ export async function getSentLikes(req, res) {
       type: row.type,
       superLike: row.type === 'super_like',
       handle: row.handle,
-      age: row.age,
+      // Privacy keepers: hidden age/distance don't show in the likes sheet.
+      age: row.hideAge ? null : row.age,
       pronouns: row.pronouns ?? null,
       verified: Boolean(row.verified),
-      distanceLabel: computeDistanceLabel(viewer?.latApprox, viewer?.lngApprox, row.latApprox, row.lngApprox),
+      distanceLabel: row.hideDistance
+          ? null
+          : computeDistanceLabel(viewer?.latApprox, viewer?.lngApprox, row.latApprox, row.lngApprox),
       mainPhoto: row.mainPhoto ?? null,
       mainPhotoIsBlurred: Boolean(row.mainPhotoIsBlurred),
       mainPhotoBlurAmount: Number(row.mainPhotoBlurAmount ?? 70),

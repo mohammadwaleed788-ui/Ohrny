@@ -78,6 +78,13 @@
       "when": 1781603952674,
       "tag": "0010_complex_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781683113991,
+      "tag": "0011_lethal_purple_man",
+      "breakpoints": true
     }
   ]
 }

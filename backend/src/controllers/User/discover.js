@@ -384,11 +384,14 @@ export async function getDiscoverCards(req, res) {
         city: users.city,
         verified: sql`coalesce(${users.profileCompletePct}, 0) >= ${VERIFIED_MIN_PCT}`,
         distanceMiles: distanceSelectSql,
+        hideAge: userPrivacySettings.hideAge,
+        hideDistance: userPrivacySettings.hideDistance,
         boostRank: boostedOrderSql,
         compatRank: advancedCompatibility ? compatibilityOrderSql : sql`null`,
       })
       .from(users)
       .leftJoin(userLifestyle, eq(users.id, userLifestyle.userId))
+      .leftJoin(userPrivacySettings, eq(users.id, userPrivacySettings.userId))
       .where(sql.join(whereParts, sql` and `))
       .orderBy(...orderByClause)
       .limit(limit + 1)
@@ -482,7 +485,9 @@ export async function getDiscoverCards(req, res) {
       return {
         id: row.id,
         handle: row.handle,
-        age: row.age,
+        // Privacy keepers: a user who hides their age/distance shows neither in
+        // discovery (revealed in chat once the match is mutually unlocked).
+        age: row.hideAge ? null : row.age,
         pronouns: row.pronouns ?? null,
         looking: row.looking ?? null,
         relStatus: row.relStatus ?? null,
@@ -492,8 +497,8 @@ export async function getDiscoverCards(req, res) {
         city: row.city ?? null,
         verified: Boolean(row.verified),
         isBoosted: Number(row.boostRank) === 0,
-        distanceMiles: distanceMiles != null ? Number(distanceMiles.toFixed(2)) : null,
-        distanceLabel: distanceMiles != null ? `${Math.max(1, Math.round(distanceMiles))} mi` : null,
+        distanceMiles: row.hideDistance || distanceMiles == null ? null : Number(distanceMiles.toFixed(2)),
+        distanceLabel: row.hideDistance || distanceMiles == null ? null : `${Math.max(1, Math.round(distanceMiles))} mi`,
         interests,
         photos,
         prompts,
@@ -799,7 +804,7 @@ export async function getUserProfile(req, res) {
       return res.status(404).json({ error: 'User not found' })
     }
 
-    const [viewerRow, allPhotos, allPrompts, allInterests, allLifestyles] = await Promise.all([
+    const [viewerRow, allPhotos, allPrompts, allInterests, allLifestyles, privacyRows] = await Promise.all([
       db.select({ latApprox: users.latApprox, lngApprox: users.lngApprox })
         .from(users).where(eq(users.id, viewerId)).limit(1),
       db.select().from(userPhotos)
@@ -813,8 +818,11 @@ export async function getUserProfile(req, res) {
         .orderBy(asc(userInterests.position)),
       db.select().from(userLifestyle)
         .where(eq(userLifestyle.userId, targetId)),
+      db.select({ hideAge: userPrivacySettings.hideAge, hideDistance: userPrivacySettings.hideDistance })
+        .from(userPrivacySettings).where(eq(userPrivacySettings.userId, targetId)).limit(1),
     ])
 
+    const privacy = privacyRows[0] || {}
     const viewer = viewerRow[0]
     const vLat = viewer?.latApprox
     const vLng = viewer?.lngApprox
@@ -840,7 +848,9 @@ export async function getUserProfile(req, res) {
     return res.json({
       id: row.id,
       handle: row.handle,
-      age: row.age,
+      // Hidden age/distance stay hidden in the profile view (revealed only in
+      // chat after a mutual unlock).
+      age: privacy.hideAge ? null : row.age,
       pronouns: row.pronouns ?? null,
       looking: row.looking ?? null,
       relStatus: row.relStatus ?? null,
@@ -849,8 +859,8 @@ export async function getUserProfile(req, res) {
       aboutMe: row.aboutMe ?? null,
       city: row.city ?? null,
       verified: Boolean(row.verified),
-      distanceMiles,
-      distanceLabel,
+      distanceMiles: privacy.hideDistance ? null : distanceMiles,
+      distanceLabel: privacy.hideDistance ? null : distanceLabel,
       interests: allInterests.slice(0, 6).map((i) => i.interest),
       photos: allPhotos.slice(0, 6).map((p) => ({
         id: p.id, storageKey: p.storageKey, position: p.position,

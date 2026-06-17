@@ -21,6 +21,11 @@ export const userPrivacySettings = pgTable('user_privacy_settings', {
   screenshotShield:       boolean('screenshot_shield').notNull().default(true),
   incognitoMode:          boolean('incognito_mode').notNull().default(false),
 
+  // ── Plus "Privacy keepers" — hide age/distance from others. Revealed in chat
+  // once the match is mutually unlocked (same gate as photos).
+  hideAge:                boolean('hide_age').notNull().default(false),
+  hideDistance:           boolean('hide_distance').notNull().default(false),
+
   // ── Privacy preferences (cookie / data sheet) ─────────────────────────────
   analyticsConsent:       boolean('analytics_consent').notNull().default(true),
   personalizationConsent: boolean('personalization_consent').notNull().default(true),

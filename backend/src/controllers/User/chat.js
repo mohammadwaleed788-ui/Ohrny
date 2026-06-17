@@ -94,6 +94,8 @@ export async function getMatches(req, res) {
             plan: users.plan,
             screenshotShield: userPrivacySettings.screenshotShield,
             ephemeralMessages: userPrivacySettings.ephemeralMessages,
+            hideAge: userPrivacySettings.hideAge,
+            hideDistance: userPrivacySettings.hideDistance,
           })
           .from(users)
           .leftJoin(
@@ -160,7 +162,13 @@ export async function getMatches(req, res) {
           partner: {
             id: partnerId,
             handle: partner?.handle ?? null,
-            age: partner?.age ?? null,
+            // Hidden age stays null in the list; it's revealed in the partner
+            // profile only after a mutual unlock.
+            age: partner?.hideAge ? null : (partner?.age ?? null),
+            // Surfaced so the chat can show the reveal card when the partner
+            // has anything hidden (photos blurred OR age OR distance).
+            hideAge: Boolean(partner?.hideAge),
+            hideDistance: Boolean(partner?.hideDistance),
             verified: Boolean(partner?.verified),
             mainPhoto: photo?.storageKey ?? null,
             blurAmount: photo?.blurAmount ?? 70,
@@ -753,7 +761,7 @@ export async function getPartnerProfile(req, res) {
     }
 
     // Batch fetch everything else in parallel
-    const [viewerRow, allPhotos, allPrompts, allInterests, allLifestyles] = await Promise.all([
+    const [viewerRow, allPhotos, allPrompts, allInterests, allLifestyles, privacyRows] = await Promise.all([
       db.select({ latApprox: users.latApprox, lngApprox: users.lngApprox })
         .from(users).where(eq(users.id, userId)).limit(1),
       db.select().from(userPhotos)
@@ -767,7 +775,16 @@ export async function getPartnerProfile(req, res) {
         .orderBy(asc(userInterests.position)),
       db.select().from(userLifestyle)
         .where(eq(userLifestyle.userId, partnerId)),
+      db.select({ hideAge: userPrivacySettings.hideAge, hideDistance: userPrivacySettings.hideDistance })
+        .from(userPrivacySettings).where(eq(userPrivacySettings.userId, partnerId)).limit(1),
     ])
+
+    // Privacy keepers: hidden age/distance reveal in chat only after the match is
+    // mutually unlocked (the same gate as photos). Flags tell the app to show a
+    // "hidden until you both reveal" placeholder.
+    const priv = privacyRows[0] || {}
+    const ageHidden = Boolean(priv.hideAge) && !match.photosUnlocked
+    const distanceHidden = Boolean(priv.hideDistance) && !match.photosUnlocked
 
     // Distance calculation
     const toNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null }
@@ -800,7 +817,8 @@ export async function getPartnerProfile(req, res) {
     return res.json({
       id: row.id,
       handle: row.handle,
-      age: row.age,
+      age: ageHidden ? null : row.age,
+      ageHidden,
       pronouns: row.pronouns ?? null,
       looking: row.looking ?? null,
       relStatus: row.relStatus ?? null,
@@ -809,8 +827,9 @@ export async function getPartnerProfile(req, res) {
       aboutMe: row.aboutMe ?? null,
       city: row.city ?? null,
       verified: Boolean(row.verified),
-      distanceMiles,
-      distanceLabel,
+      distanceMiles: distanceHidden ? null : distanceMiles,
+      distanceLabel: distanceHidden ? null : distanceLabel,
+      distanceHidden,
       interests: allInterests.slice(0, 6).map((i) => i.interest),
       photos,
       prompts: allPrompts.slice(0, 3).map((p) => ({

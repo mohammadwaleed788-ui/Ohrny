@@ -768,6 +768,8 @@ export async function updatePrivacy(req, res) {
       ephemeralMessages,
       screenshotShield,
       incognitoMode,
+      hideAge,
+      hideDistance,
       analyticsConsent,
       personalizationConsent,
       marketingEmails,
@@ -785,6 +787,18 @@ export async function updatePrivacy(req, res) {
         if (!access.ok) return res.status(access.status).json(access.body)
       }
       updates.incognitoMode = Boolean(incognitoMode)
+    }
+    // Hide age / distance — Plus+ only; coerce OFF for non-entitled users
+    // (the client re-sends stored flags, so don't fail the whole save).
+    if (hideAge !== undefined) {
+      let on = Boolean(hideAge)
+      if (on && !(await assertFeature(userId, 'hideAge')).ok) on = false
+      updates.hideAge = on
+    }
+    if (hideDistance !== undefined) {
+      let on = Boolean(hideDistance)
+      if (on && !(await assertFeature(userId, 'hideDistance')).ok) on = false
+      updates.hideDistance = on
     }
     if (analyticsConsent !== undefined) updates.analyticsConsent = Boolean(analyticsConsent)
     if (personalizationConsent !== undefined) updates.personalizationConsent = Boolean(personalizationConsent)

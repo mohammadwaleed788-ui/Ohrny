@@ -1,0 +1,2 @@
+ALTER TABLE "user_privacy_settings" ADD COLUMN "hide_age" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "user_privacy_settings" ADD COLUMN "hide_distance" boolean DEFAULT false NOT NULL;
