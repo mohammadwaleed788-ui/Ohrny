@@ -16,7 +16,10 @@ export const messages = pgTable('messages', {
 
   content:      text('content').notNull(),
 
-  // ── Read receipts (Ohrny Platin only) ─────────────────────────────────────
+  // ── Delivery + read receipts (seen/last-active visible to Platin only) ─────
+  // deliveredAt: stamped when the recipient's device/app actually received the
+  // message (single tick → double tick). readAt: when they opened the chat.
+  deliveredAt:  timestamp('delivered_at', { withTimezone: true }),
   isRead:       boolean('is_read').notNull().default(false),
   readAt:       timestamp('read_at', { withTimezone: true }),
 

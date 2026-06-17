@@ -1,9 +1,10 @@
 import { Server } from 'socket.io'
-import { and, eq, or } from 'drizzle-orm'
+import { and, eq, isNull, or } from 'drizzle-orm'
 import { socketAuthMiddleware } from './auth.js'
 import { db } from '../../db/index.js'
 import { matches } from '../../db/schema/matching.js'
 import { calls, messages } from '../../db/schema/messaging.js'
+import { users } from '../../db/schema/users.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../services/notifications/chatNotification.js'
 import { assertCanMessage, assertFeature, getEffectiveEntitlements } from '../services/entitlementService.js'
 
@@ -11,6 +12,79 @@ let io = null
 
 export function getIO() {
   return io
+}
+
+// ── Presence ────────────────────────────────────────────────────────────────
+// In-memory online tracking: userId -> number of live socket connections.
+// (Single-instance only; a multi-node deployment would need a Redis adapter.)
+const onlineUsers = new Map()
+
+export function isUserOnline(userId) {
+  return (onlineUsers.get(userId) || 0) > 0
+}
+
+// Returns true when this is the user's FIRST connection (offline → online).
+function addOnline(userId) {
+  const n = (onlineUsers.get(userId) || 0) + 1
+  onlineUsers.set(userId, n)
+  return n === 1
+}
+
+// Returns true when this was the user's LAST connection (online → offline).
+function removeOnline(userId) {
+  const n = (onlineUsers.get(userId) || 0) - 1
+  if (n <= 0) onlineUsers.delete(userId)
+  else onlineUsers.set(userId, n)
+  return n <= 0
+}
+
+function touchLastActive(userId) {
+  db.update(users)
+    .set({ lastActiveAt: new Date() })
+    .where(eq(users.id, userId))
+    .catch((err) => console.error('touchLastActive error:', err.message))
+}
+
+// Broadcast a presence change to both members of each of the user's matches.
+// App gates display to Platin viewers; the payload itself is low-sensitivity.
+function broadcastPresence(userId, matchInfos, online, lastActiveAt) {
+  if (!io) return
+  const payload = { userId, online, lastActiveAt: lastActiveAt ?? null }
+  for (const m of matchInfos) {
+    io.to(`match:${m.id}`).emit('user:presence', payload)
+  }
+}
+
+// Mark every still-undelivered message addressed to `recipientId` as delivered
+// (used when they come online), and tell each sender — gated by the sender's
+// readReceipts entitlement — so their ticks flip to double-grey.
+async function deliverPendingForRecipient(recipientId, matchInfos) {
+  for (const m of matchInfos) {
+    const partnerId = m.userAId === recipientId ? m.userBId : m.userAId
+    try {
+      const updated = await db
+        .update(messages)
+        .set({ deliveredAt: new Date() })
+        .where(
+          and(
+            eq(messages.matchId, m.id),
+            eq(messages.senderId, partnerId),
+            isNull(messages.deliveredAt),
+          ),
+        )
+        .returning({ id: messages.id })
+      if (!updated.length) continue
+      const acc = await assertFeature(partnerId, 'readReceipts')
+      if (acc.ok) {
+        io.to(`user:${partnerId}`).emit('message:delivered', {
+          matchId: m.id,
+          deliveredTo: recipientId,
+        })
+      }
+    } catch (err) {
+      console.error('deliverPending error:', err.message)
+    }
+  }
 }
 
 // Fire-and-forget emit to a single user's personal room (all their devices).
@@ -134,7 +208,11 @@ export function initSocket(server) {
     // Join rooms for all active matches
     try {
       const userMatches = await db
-        .select({ id: matches.id })
+        .select({
+          id: matches.id,
+          userAId: matches.userAId,
+          userBId: matches.userBId,
+        })
         .from(matches)
         .where(
           and(
@@ -148,6 +226,20 @@ export function initSocket(server) {
       }
 
       socket.join(`user:${userId}`)
+
+      // Stash match membership for the disconnect handler (presence broadcast).
+      socket.data.matchInfos = userMatches
+
+      // ── Presence: mark online, stamp last-active, notify match partners ──
+      const becameOnline = addOnline(userId)
+      touchLastActive(userId)
+      if (becameOnline) {
+        broadcastPresence(userId, userMatches, true)
+        // Anything sent while they were offline is now delivered.
+        deliverPendingForRecipient(userId, userMatches).catch((err) =>
+          console.error('deliverPending(connect) error:', err.message),
+        )
+      }
     } catch (err) {
       console.error('Socket room join error:', err.message)
     }
@@ -156,7 +248,10 @@ export function initSocket(server) {
       try {
         const { matchId } = data || {}
         const ok = await joinSocketToMatchIfMember(socket, matchId)
-        if (ok) socket.data.activeMatchId = matchId
+        if (ok) {
+          socket.data.activeMatchId = matchId
+          touchLastActive(userId)
+        }
         ack?.({ ok })
       } catch (err) {
         console.error('chat:open error:', err.message)
@@ -204,6 +299,9 @@ export function initSocket(server) {
           ? new Date(now.getTime() + 24 * 60 * 60 * 1000)
           : null
 
+        // Delivered immediately if the recipient currently has a live socket.
+        const recipientOnline = isUserOnline(recipientId)
+
         const [msg] = await db
           .insert(messages)
           .values({
@@ -212,9 +310,12 @@ export function initSocket(server) {
             content: content.trim(),
             isEphemeral,
             expiresAt,
+            deliveredAt: recipientOnline ? now : null,
             createdAt: now,
           })
           .returning()
+
+        touchLastActive(userId)
 
         const countField = isUserA
           ? { messageCountUserA: access.myMessageCount + 1 }
@@ -237,6 +338,19 @@ export function initSocket(server) {
         await attachUsersToMatchRoom([userId, recipientId], matchId, { emitMatchNew: false })
         io.to(`match:${matchId}`).emit('message:new', outMsg)
         ack?.({ ok: true, message: outMsg })
+
+        // Tell the sender their message is delivered (double-grey tick) — gated
+        // by the sender's own readReceipts entitlement.
+        if (recipientOnline) {
+          const acc = await assertFeature(userId, 'readReceipts')
+          if (acc.ok) {
+            io.to(`user:${userId}`).emit('message:delivered', {
+              matchId,
+              deliveredTo: recipientId,
+              messageId: msg.id,
+            })
+          }
+        }
 
         // Push unless the recipient is actively reading this exact chat.
         if (!(await isUserReadingMatch(recipientId, matchId))) {
@@ -411,6 +525,22 @@ export function initSocket(server) {
 
     socket.on('disconnect', () => {
       endActiveCallForDisconnectedSocket(socket)
+
+      // ── Presence: if this was the user's last socket, go offline ──
+      const wentOffline = removeOnline(userId)
+      if (wentOffline) {
+        const lastActiveAt = new Date()
+        db.update(users)
+          .set({ lastActiveAt })
+          .where(eq(users.id, userId))
+          .catch((err) => console.error('disconnect lastActive error:', err.message))
+        broadcastPresence(
+          userId,
+          socket.data.matchInfos || [],
+          false,
+          lastActiveAt.toISOString(),
+        )
+      }
     })
   })
 

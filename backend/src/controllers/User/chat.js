@@ -5,7 +5,7 @@ import { messages } from '../../../db/schema/messaging.js'
 import { users, userPhotos, userPrompts, userInterests, userLifestyle } from '../../../db/schema/users.js'
 import { userPrivacySettings } from '../../../db/schema/settings.js'
 import { blocks } from '../../../db/schema/safety.js'
-import { attachUsersToMatchRoom, getIO, isUserReadingMatch } from '../../socket/index.js'
+import { attachUsersToMatchRoom, getIO, isUserOnline, isUserReadingMatch } from '../../socket/index.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../../services/notifications/chatNotification.js'
 import { assertCanMessage, assertFeature } from '../../services/entitlementService.js'
 
@@ -55,6 +55,9 @@ async function getVisibleSentMessageCount(matchId, userId) {
 export async function getMatches(req, res) {
   try {
     const userId = req.user.id
+    // Seen-ticks are a Platin feature — non-Platin viewers never see delivered/
+    // read status on their own sent messages.
+    const canSeeReceipts = (await assertFeature(userId, 'readReceipts')).ok
 
     const rows = await db
       .select({
@@ -96,6 +99,7 @@ export async function getMatches(req, res) {
             ephemeralMessages: userPrivacySettings.ephemeralMessages,
             hideAge: userPrivacySettings.hideAge,
             hideDistance: userPrivacySettings.hideDistance,
+            lastActiveAt: users.lastActiveAt,
           })
           .from(users)
           .leftJoin(
@@ -125,6 +129,8 @@ export async function getMatches(req, res) {
             senderId: messages.senderId,
             content: messages.content,
             createdAt: messages.createdAt,
+            deliveredAt: messages.deliveredAt,
+            isRead: messages.isRead,
           })
           .from(messages)
           .where(
@@ -185,6 +191,9 @@ export async function getMatches(req, res) {
               Boolean(partner?.ephemeralMessages) &&
               Boolean(partner?.plan && partner.plan !== 'free'),
             isPaused: Boolean(partner?.isPaused),
+            // Presence — app shows "Active now / last active" to Platin only.
+            isOnline: isUserOnline(partnerId),
+            lastActiveAt: partner?.lastActiveAt ?? null,
           },
           lastMessage: lastMsg
             ? {
@@ -193,6 +202,15 @@ export async function getMatches(req, res) {
                 content: lastMsg.content,
                 createdAt: lastMsg.createdAt,
                 fromMe: lastMsg.senderId === userId,
+                // Tick status for MY last message — Platin only.
+                isDelivered:
+                  lastMsg.senderId === userId && canSeeReceipts
+                    ? Boolean(lastMsg.deliveredAt)
+                    : false,
+                isRead:
+                  lastMsg.senderId === userId && canSeeReceipts
+                    ? Boolean(lastMsg.isRead)
+                    : false,
               }
             : null,
           unreadCount: Number(unreadRow?.count || 0),
@@ -249,6 +267,7 @@ export async function getMessages(req, res) {
         content: messages.content,
         isRead: messages.isRead,
         readAt: messages.readAt,
+        deliveredAt: messages.deliveredAt,
         isEphemeral: messages.isEphemeral,
         expiresAt: messages.expiresAt,
         createdAt: messages.createdAt,
@@ -268,11 +287,14 @@ export async function getMessages(req, res) {
     return res.json({
       messages: sliced.map((m) => {
         const fromMe = m.senderId === userId
+        // Delivered/seen ticks on your OWN messages are Platin-only.
+        const hideReceipts = fromMe && !canSeeReadReceipts
         return {
           ...m,
           fromMe,
-          isRead: fromMe && !canSeeReadReceipts ? false : m.isRead,
-          readAt: fromMe && !canSeeReadReceipts ? null : m.readAt,
+          isRead: hideReceipts ? false : m.isRead,
+          readAt: hideReceipts ? null : m.readAt,
+          deliveredAt: hideReceipts ? null : m.deliveredAt,
         }
       }),
       nextCursor,
@@ -348,6 +370,9 @@ export async function sendMessage(req, res) {
       ? new Date(now.getTime() + 24 * 60 * 60 * 1000)
       : null
 
+    // Delivered immediately if the recipient currently has a live socket.
+    const recipientOnline = isUserOnline(recipientId)
+
     const [msg] = await db
       .insert(messages)
       .values({
@@ -356,6 +381,7 @@ export async function sendMessage(req, res) {
         content: content.trim(),
         isEphemeral: ephemeralOn,
         expiresAt,
+        deliveredAt: recipientOnline ? now : null,
         createdAt: now,
       })
       .returning()
@@ -385,6 +411,15 @@ export async function sendMessage(req, res) {
     if (io) {
       await attachUsersToMatchRoom([userId, recipientId], matchId, { emitMatchNew: false })
       io.to(`match:${matchId}`).emit('message:new', outMsg)
+
+      // Tell the sender it's delivered (double-grey tick) — Platin only.
+      if (recipientOnline && (await assertFeature(userId, 'readReceipts')).ok) {
+        io.to(`user:${userId}`).emit('message:delivered', {
+          matchId,
+          deliveredTo: recipientId,
+          messageId: msg.id,
+        })
+      }
 
       if (!(await isUserReadingMatch(recipientId, matchId))) {
         notifyNewMessage(recipientId, req.user.handle, matchId)

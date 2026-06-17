@@ -67,6 +67,11 @@ export const users = pgTable('users', {
   disguise:             disguiseEnum('disguise').notNull().default('ohrny'),
   panicFabEnabled:      boolean('panic_fab_enabled').notNull().default(true),
 
+  // ── Presence ───────────────────────────────────────────────────────────────
+  // Last time the user had a live socket connection (or opened a chat). Shown as
+  // "Active now / Last active Xm ago" to Platin viewers only.
+  lastActiveAt:         timestamp('last_active_at', { withTimezone: true }),
+
   // ── Account state ──────────────────────────────────────────────────────────
   isBanned:             boolean('is_banned').notNull().default(false),
   isPaused:             boolean('is_paused').notNull().default(false),

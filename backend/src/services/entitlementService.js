@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm'
 import { db } from '../../db/index.js'
 import { users } from '../../db/schema/users.js'
 import { matches } from '../../db/schema/matching.js'
@@ -11,6 +11,10 @@ import {
   userBoosts,
 } from '../../db/schema/subscriptions.js'
 import { userDiscoverPreferences } from '../../db/schema/settings.js'
+import {
+  notifyWeeklySuperLikes,
+  notifyWeeklyBoost,
+} from './notifications/subscriptionNotification.js'
 
 export const PLAN_ORDER = ['free', 'plus', 'platin', 'private']
 export const DURATION_ORDER = ['1w', '1m', '3m', '6m']
@@ -70,7 +74,8 @@ export const DEFAULT_PLAN_CONFIGS = {
     swipesPerDay: null,
     maxChats: null,
     maxMessagesPerChat: null,
-    superLikesPerWeek: 10,
+    // 7/week — same weekly top-up mechanism as Plus, marketed as "~1 a day".
+    superLikesPerWeek: 7,
     canSeeLikes: true,
     incognitoMode: true,
     priorityLikes: true,
@@ -867,6 +872,12 @@ export async function grantWeeklySuperLikes(client = db) {
   for (const [planId, cfg] of Object.entries(DEFAULT_PLAN_CONFIGS)) {
     const allowance = Number(cfg.superLikesPerWeek || 0)
     if (allowance <= 0) continue
+    // Only members below the allowance are actually topped up — notify just
+    // them (those already at/above the cap get no change and no notification).
+    const toGrant = await client
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.plan, planId), lt(users.superLikesLeft, allowance)))
     await client
       .update(users)
       .set({
@@ -874,6 +885,7 @@ export async function grantWeeklySuperLikes(client = db) {
         updatedAt: now,
       })
       .where(eq(users.plan, planId))
+    for (const u of toGrant) notifyWeeklySuperLikes(u.id, allowance)
   }
 }
 
@@ -929,5 +941,6 @@ export async function grantWeeklyPlatinBoosts(client = db) {
       isActive: false,
       isFreeWeekly: true,
     })
+    notifyWeeklyBoost(row.userId)
   }
 }
