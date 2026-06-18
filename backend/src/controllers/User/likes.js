@@ -1,12 +1,14 @@
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { likes, matches } from '../../../db/schema/matching.js'
+import { messages } from '../../../db/schema/messaging.js'
 import { users, userPhotos } from '../../../db/schema/users.js'
 import { userPrivacySettings } from '../../../db/schema/settings.js'
 import { blocks } from '../../../db/schema/safety.js'
 import { notifyNewMatch, notifyPassed } from '../../services/notifications/likeNotification.js'
 import { attachUsersToMatchRoom } from '../../socket/index.js'
 import { assertFeature } from '../../services/entitlementService.js'
+import { displayHandle } from '../../utils/handle.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -174,6 +176,7 @@ export async function getReceivedLikes(req, res) {
         lngApprox: users.lngApprox,
         hideAge: userPrivacySettings.hideAge,
         hideDistance: userPrivacySettings.hideDistance,
+        anonymousHandle: userPrivacySettings.anonymousHandle,
         mainPhoto: sql`(
           select ${userPhotos.storageKey}
           from ${userPhotos}
@@ -252,7 +255,7 @@ export async function getReceivedLikes(req, res) {
         type: row.type,
         superLike: isSuperLike,
         // Everyone sees the real card now. Liking back is the gated action.
-        handle: row.handle,
+        handle: displayHandle(row.handle, { anonymous: row.anonymousHandle }),
         // Privacy keepers: hidden age/distance don't show in the likes sheet.
         age: row.hideAge ? null : row.age,
         pronouns: row.pronouns,
@@ -425,9 +428,27 @@ export async function getLikesActivity(req, res) {
         ),
       )
 
+    // Unread conversations — distinct active matches with ≥1 unread message
+    // from the partner. Drives the Messages tab badge WITHOUT loading the list.
+    const [chatRow] = await db
+      .select({ unreadChats: sql`count(distinct ${messages.matchId})::int` })
+      .from(messages)
+      .innerJoin(matches, eq(matches.id, messages.matchId))
+      .where(
+        and(
+          eq(matches.isActive, true),
+          or(eq(matches.userAId, userId), eq(matches.userBId, userId)),
+          sql`${messages.senderId} <> ${userId}`,
+          eq(messages.isRead, false),
+          isNull(messages.deletedAt),
+          sql`(${messages.deletedForUserId} is null or ${messages.deletedForUserId} <> ${userId})`,
+        ),
+      )
+
     return res.json({
       newLikes: Number(likeRow?.newLikes || 0),
       newMatches: Number(matchRow?.newMatches || 0),
+      unreadChats: Number(chatRow?.unreadChats || 0),
     })
   } catch (err) {
     console.error(err)
@@ -481,6 +502,7 @@ export async function getSentLikes(req, res) {
           lngApprox: users.lngApprox,
           hideAge: userPrivacySettings.hideAge,
           hideDistance: userPrivacySettings.hideDistance,
+          anonymousHandle: userPrivacySettings.anonymousHandle,
           mainPhoto: sql`(
             select ${userPhotos.storageKey}
             from ${userPhotos}
@@ -543,7 +565,7 @@ export async function getSentLikes(req, res) {
       toUserId: row.toUserId,
       type: row.type,
       superLike: row.type === 'super_like',
-      handle: row.handle,
+      handle: displayHandle(row.handle, { anonymous: row.anonymousHandle }),
       // Privacy keepers: hidden age/distance don't show in the likes sheet.
       age: row.hideAge ? null : row.age,
       pronouns: row.pronouns ?? null,

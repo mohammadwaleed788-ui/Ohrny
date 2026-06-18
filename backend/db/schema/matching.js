@@ -69,6 +69,26 @@ export const matches = pgTable('matches', {
   activeIdx:    index('matches_active_idx').on(t.isActive),
 }));
 
+// ─── profile_views ──────────────────────────────────────────────────────────
+// LinkedIn-style "who viewed your profile". One row per (viewer, viewed) pair;
+// repeat views just bump last_viewed_at. A view is NOT recorded when the viewer
+// has incognito mode on. Tracking only for now — no notifications / UI yet.
+export const profileViews = pgTable('profile_views', {
+  id:           uuid('id').primaryKey().defaultRandom(),
+  viewerId:     uuid('viewer_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  viewedId:     uuid('viewed_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+
+  // When the viewed user opened their "Viewed you" list (future UI / badge).
+  seenAt:       timestamp('seen_at', { withTimezone: true }),
+
+  createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastViewedAt: timestamp('last_viewed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  uniquePair:   uniqueIndex('profile_views_pair_uniq').on(t.viewerId, t.viewedId),
+  viewedIdx:    index('profile_views_viewed_idx').on(t.viewedId),
+  viewerIdx:    index('profile_views_viewer_idx').on(t.viewerId),
+}));
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 export const likesRelations = relations(likes, ({ one }) => ({
   fromUser: one(users, { fields: [likes.fromUserId], references: [users.id], relationName: 'sentLikes' }),

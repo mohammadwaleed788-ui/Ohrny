@@ -16,7 +16,9 @@ export const userPrivacySettings = pgTable('user_privacy_settings', {
 
   // ── Privacy toggles (Settings screen) ────────────────────────────────────
   blurPhotos:             boolean('blur_photos').notNull().default(true),
-  anonymousHandle:        boolean('anonymous_handle').notNull().default(true),
+  // Default OFF — users opt in to anonymity; the real (self-chosen) handle is
+  // shown otherwise. Revealed in chat once the match is mutually unlocked.
+  anonymousHandle:        boolean('anonymous_handle').notNull().default(false),
   ephemeralMessages:      boolean('ephemeral_messages').notNull().default(true),
   screenshotShield:       boolean('screenshot_shield').notNull().default(true),
   incognitoMode:          boolean('incognito_mode').notNull().default(false),
