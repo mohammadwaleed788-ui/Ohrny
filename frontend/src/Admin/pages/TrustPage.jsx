@@ -367,6 +367,16 @@ export function TrustPage() {
   }
 
   const queueLabel = `Queue (${formatNum(summary.openReports)})`
+  const activeBanUserIds = new Set(
+    bans
+      .filter((banRow) => banRow?.active && banRow?.userId)
+      .map((banRow) => String(banRow.userId)),
+  )
+  const queueReports = reports.filter((report) => {
+    const reportUserId = String(report?.subjectId || '')
+    const isActiveBanned = reportUserId ? activeBanUserIds.has(reportUserId) : false
+    return !(report?.subjectIsBanned || isActiveBanned)
+  })
   const tabLabels = {
     queue: queueLabel,
     appeals: `Appeals (${formatNum(trustSummary.appealsOpen)})`,
@@ -443,7 +453,7 @@ export function TrustPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {reports.map((report) => (
+                  {queueReports.map((report) => (
                     <tr key={report.id} className={`border-b ${adminTokens.borderSoft} last:border-b-0`}>
                       <td className={`px-3 py-2 font-mono text-xs ${adminTokens.text}`}>{report.id}</td>
                       <td className="px-3 py-2">
@@ -474,7 +484,7 @@ export function TrustPage() {
                           <button
                             type="button"
                             className="rounded-md border border-red-500/25 bg-red-500/10 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/15"
-                            disabled={actionBusy}
+                            disabled={actionBusy || report.subjectIsBanned}
                             onClick={() => {
                               setEnforceTarget(report)
                               setEnforceAction('hard_ban')
@@ -482,7 +492,7 @@ export function TrustPage() {
                             }}
                           >
                             <Ban className="mr-1 inline h-3 w-3" />
-                            Ban
+                            {report.subjectIsBanned ? 'Banned' : 'Ban'}
                           </button>
                           <button
                             type="button"
@@ -496,7 +506,7 @@ export function TrustPage() {
                       </td>
                     </tr>
                   ))}
-                  {!loading && reports.length === 0 && (
+                  {!loading && queueReports.length === 0 && (
                     <tr>
                       <td colSpan={9} className={`px-3 py-8 text-center text-sm ${adminTokens.textDim}`}>
                         No reports found for this filter.

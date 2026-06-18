@@ -102,6 +102,7 @@ function serializeReport(row) {
     reviewedAt: row.reviewed_at,
     resolutionNote: row.resolution_note || '',
     enforcementId: row.enforcement_id || null,
+    subjectIsBanned: Boolean(row.subject_is_banned),
     aiScore: null,
     evidenceCount: null,
   }
@@ -156,7 +157,8 @@ export async function listReports(req, res) {
         r.resolution_note,
         r.enforcement_id,
         reporter.handle AS reporter_name,
-        subject.handle AS subject_name
+        subject.handle AS subject_name,
+        subject.is_banned AS subject_is_banned
       FROM reports r
       LEFT JOIN users reporter ON reporter.id = r.reporter_id
       LEFT JOIN users subject ON subject.id = r.reported_id
@@ -219,7 +221,8 @@ export async function getReportDetail(req, res) {
         r.resolution_note,
         r.enforcement_id,
         reporter.handle AS reporter_name,
-        subject.handle AS subject_name
+        subject.handle AS subject_name,
+        subject.is_banned AS subject_is_banned
       FROM reports r
       LEFT JOIN users reporter ON reporter.id = r.reporter_id
       LEFT JOIN users subject ON subject.id = r.reported_id
