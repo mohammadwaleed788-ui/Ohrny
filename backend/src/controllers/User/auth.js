@@ -528,7 +528,8 @@ export async function completeOnboarding(req, res) {
       await tx.insert(userPrivacySettings).values({
         userId: inserted.id,
         blurPhotos: privacySafe.blur !== false,
-        anonymousHandle: privacySafe.anon !== false,
+        // Default OFF — only anonymous when the user explicitly opts in.
+        anonymousHandle: privacySafe.anon === true,
         ephemeralMessages: privacySafe.ephem !== false,
         screenshotShield: privacySafe.screenshot !== false,
         incognitoMode: false,

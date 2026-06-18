@@ -2,7 +2,7 @@ import { sql, inArray, and, isNull, asc, desc, eq } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { users, userPhotos, userPrompts, userInterests, userLifestyle } from '../../../db/schema/users.js'
 import { userDiscoverPreferences, userPrivacySettings } from '../../../db/schema/settings.js'
-import { likes, matches } from '../../../db/schema/matching.js'
+import { likes, matches, profileViews } from '../../../db/schema/matching.js'
 import { blocks } from '../../../db/schema/safety.js'
 import { userBoosts } from '../../../db/schema/subscriptions.js'
 import { notifyNewLike, notifyNewMatch } from '../../services/notifications/likeNotification.js'
@@ -10,6 +10,7 @@ import { attachUsersToMatchRoom, emitToUser } from '../../socket/index.js'
 import { assertCanSwipe, assertFeature, consumeSwipe, getEffectiveEntitlements } from '../../services/entitlementService.js'
 import { VERIFIED_MIN_PCT } from '../../services/profileCompletion.js'
 import { decodeDiscoverCursor, encodeDiscoverCursor } from './discoverCursor.js'
+import { displayHandle } from '../../utils/handle.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -196,11 +197,9 @@ export async function getDiscoverCards(req, res) {
       sql`${users.age} >= ${safeAgeMin}`,
       sql`${users.age} <= ${safeAgeMax}`,
       inArray(users.relationshipGoal, relationshipTargets),
-      sql`NOT EXISTS (
-        SELECT 1 FROM ${userPrivacySettings} ups
-        WHERE ups.user_id = ${users.id}
-          AND ups.incognito_mode = true
-      )`,
+      // NOTE: incognito mode no longer hides a user from discovery — it only
+      // suppresses their profile-view trace (see recordProfileView). So there is
+      // deliberately no incognito filter here.
     ]
     if (verifiedOnly) {
       // "Verified" = a fully-complete profile (we OTP every signup, so there's
@@ -386,6 +385,7 @@ export async function getDiscoverCards(req, res) {
         distanceMiles: distanceSelectSql,
         hideAge: userPrivacySettings.hideAge,
         hideDistance: userPrivacySettings.hideDistance,
+        anonymousHandle: userPrivacySettings.anonymousHandle,
         boostRank: boostedOrderSql,
         compatRank: advancedCompatibility ? compatibilityOrderSql : sql`null`,
       })
@@ -484,7 +484,8 @@ export async function getDiscoverCards(req, res) {
 
       return {
         id: row.id,
-        handle: row.handle,
+        // Anonymous handle stays masked in discovery (revealed in chat on unlock).
+        handle: displayHandle(row.handle, { anonymous: row.anonymousHandle }),
         // Privacy keepers: a user who hides their age/distance shows neither in
         // discovery (revealed in chat once the match is mutually unlocked).
         age: row.hideAge ? null : row.age,
@@ -758,6 +759,44 @@ export async function rewindLastSwipe(req, res) {
   }
 }
 
+// Record a profile view (LinkedIn-style "seen-by"). One row per (viewer,
+// viewed) pair — repeat views just bump last_viewed_at. Skipped entirely when
+// the viewer has incognito mode on, so an incognito user leaves no trace.
+// Tracking only for now: no notification is sent.
+async function recordProfileView(viewerId, viewedId) {
+  if (!viewerId || !viewedId || viewerId === viewedId) return
+
+  const [viewerPrivacy] = await db
+    .select({ incognitoMode: userPrivacySettings.incognitoMode })
+    .from(userPrivacySettings)
+    .where(eq(userPrivacySettings.userId, viewerId))
+    .limit(1)
+  if (viewerPrivacy?.incognitoMode) return
+
+  const now = new Date()
+  await db
+    .insert(profileViews)
+    .values({ viewerId, viewedId, createdAt: now, lastViewedAt: now })
+    .onConflictDoUpdate({
+      target: [profileViews.viewerId, profileViews.viewedId],
+      set: { lastViewedAt: now },
+    })
+}
+
+// POST /user/discover/view/:userId — record that the viewer was shown this
+// user's profile in the deck (fired in the background as cards surface, with no
+// regard to swipe/like). Incognito viewers leave no trace (handled in the
+// helper). Tracking only — no notification yet.
+export async function recordView(req, res) {
+  try {
+    await recordProfileView(req.user.id, req.params.userId)
+    return res.json({ ok: true })
+  } catch (err) {
+    console.error('recordView error:', err.message)
+    return res.status(500).json({ error: 'Failed to record view' })
+  }
+}
+
 export async function getUserProfile(req, res) {
   try {
     const viewerId = req.user.id
@@ -818,12 +857,20 @@ export async function getUserProfile(req, res) {
         .orderBy(asc(userInterests.position)),
       db.select().from(userLifestyle)
         .where(eq(userLifestyle.userId, targetId)),
-      db.select({ hideAge: userPrivacySettings.hideAge, hideDistance: userPrivacySettings.hideDistance })
+      db.select({
+        hideAge: userPrivacySettings.hideAge,
+        hideDistance: userPrivacySettings.hideDistance,
+        anonymousHandle: userPrivacySettings.anonymousHandle,
+      })
         .from(userPrivacySettings).where(eq(userPrivacySettings.userId, targetId)).limit(1),
     ])
 
     const privacy = privacyRows[0] || {}
     const viewer = viewerRow[0]
+
+    // Record that the viewer opened this profile (skipped when the viewer is
+    // incognito). Fire-and-forget — never block or fail the profile response.
+    recordProfileView(viewerId, targetId).catch(() => {})
     const vLat = viewer?.latApprox
     const vLng = viewer?.lngApprox
     const rLat = row.latApprox
@@ -847,7 +894,7 @@ export async function getUserProfile(req, res) {
 
     return res.json({
       id: row.id,
-      handle: row.handle,
+      handle: displayHandle(row.handle, { anonymous: privacy.anonymousHandle }),
       // Hidden age/distance stay hidden in the profile view (revealed only in
       // chat after a mutual unlock).
       age: privacy.hideAge ? null : row.age,

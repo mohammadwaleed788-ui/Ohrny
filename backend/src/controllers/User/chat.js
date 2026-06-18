@@ -8,6 +8,7 @@ import { blocks } from '../../../db/schema/safety.js'
 import { attachUsersToMatchRoom, getIO, isUserOnline, isUserReadingMatch } from '../../socket/index.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../../services/notifications/chatNotification.js'
 import { assertCanMessage, assertFeature } from '../../services/entitlementService.js'
+import { displayHandle } from '../../utils/handle.js'
 
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 50
@@ -99,6 +100,7 @@ export async function getMatches(req, res) {
             ephemeralMessages: userPrivacySettings.ephemeralMessages,
             hideAge: userPrivacySettings.hideAge,
             hideDistance: userPrivacySettings.hideDistance,
+            anonymousHandle: userPrivacySettings.anonymousHandle,
             lastActiveAt: users.lastActiveAt,
           })
           .from(users)
@@ -167,14 +169,20 @@ export async function getMatches(req, res) {
           myMessageCount: await getVisibleSentMessageCount(row.matchId, userId),
           partner: {
             id: partnerId,
-            handle: partner?.handle ?? null,
+            // Anonymous handle is revealed only after the mutual unlock (same
+            // gate as photos/age/distance); masked as "Anonymous" before that.
+            handle: displayHandle(partner?.handle ?? null, {
+              anonymous: Boolean(partner?.anonymousHandle),
+              revealed: row.photosUnlocked,
+            }),
             // Hidden age stays null in the list; it's revealed in the partner
             // profile only after a mutual unlock.
             age: partner?.hideAge ? null : (partner?.age ?? null),
             // Surfaced so the chat can show the reveal card when the partner
-            // has anything hidden (photos blurred OR age OR distance).
+            // has anything hidden (photos blurred OR age OR distance OR name).
             hideAge: Boolean(partner?.hideAge),
             hideDistance: Boolean(partner?.hideDistance),
+            hideName: Boolean(partner?.anonymousHandle),
             verified: Boolean(partner?.verified),
             mainPhoto: photo?.storageKey ?? null,
             blurAmount: photo?.blurAmount ?? 70,
@@ -810,7 +818,11 @@ export async function getPartnerProfile(req, res) {
         .orderBy(asc(userInterests.position)),
       db.select().from(userLifestyle)
         .where(eq(userLifestyle.userId, partnerId)),
-      db.select({ hideAge: userPrivacySettings.hideAge, hideDistance: userPrivacySettings.hideDistance })
+      db.select({
+        hideAge: userPrivacySettings.hideAge,
+        hideDistance: userPrivacySettings.hideDistance,
+        anonymousHandle: userPrivacySettings.anonymousHandle,
+      })
         .from(userPrivacySettings).where(eq(userPrivacySettings.userId, partnerId)).limit(1),
     ])
 
@@ -851,7 +863,11 @@ export async function getPartnerProfile(req, res) {
 
     return res.json({
       id: row.id,
-      handle: row.handle,
+      // Anonymous handle revealed only after the mutual unlock.
+      handle: displayHandle(row.handle, {
+        anonymous: Boolean(priv.anonymousHandle),
+        revealed: match.photosUnlocked,
+      }),
       age: ageHidden ? null : row.age,
       ageHidden,
       pronouns: row.pronouns ?? null,

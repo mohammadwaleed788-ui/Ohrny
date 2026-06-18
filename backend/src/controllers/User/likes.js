@@ -7,6 +7,7 @@ import { blocks } from '../../../db/schema/safety.js'
 import { notifyNewMatch, notifyPassed } from '../../services/notifications/likeNotification.js'
 import { attachUsersToMatchRoom } from '../../socket/index.js'
 import { assertFeature } from '../../services/entitlementService.js'
+import { displayHandle } from '../../utils/handle.js'
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
@@ -155,6 +156,7 @@ export async function getReceivedLikes(req, res) {
         lngApprox: users.lngApprox,
         hideAge: userPrivacySettings.hideAge,
         hideDistance: userPrivacySettings.hideDistance,
+        anonymousHandle: userPrivacySettings.anonymousHandle,
         mainPhoto: sql`(
           select ${userPhotos.storageKey}
           from ${userPhotos}
@@ -233,7 +235,7 @@ export async function getReceivedLikes(req, res) {
         type: row.type,
         superLike: isSuperLike,
         // Everyone sees the real card now. Liking back is the gated action.
-        handle: row.handle,
+        handle: displayHandle(row.handle, { anonymous: row.anonymousHandle }),
         // Privacy keepers: hidden age/distance don't show in the likes sheet.
         age: row.hideAge ? null : row.age,
         pronouns: row.pronouns,
@@ -462,6 +464,7 @@ export async function getSentLikes(req, res) {
           lngApprox: users.lngApprox,
           hideAge: userPrivacySettings.hideAge,
           hideDistance: userPrivacySettings.hideDistance,
+          anonymousHandle: userPrivacySettings.anonymousHandle,
           mainPhoto: sql`(
             select ${userPhotos.storageKey}
             from ${userPhotos}
@@ -524,7 +527,7 @@ export async function getSentLikes(req, res) {
       toUserId: row.toUserId,
       type: row.type,
       superLike: row.type === 'super_like',
-      handle: row.handle,
+      handle: displayHandle(row.handle, { anonymous: row.anonymousHandle }),
       // Privacy keepers: hidden age/distance don't show in the likes sheet.
       age: row.hideAge ? null : row.age,
       pronouns: row.pronouns ?? null,
