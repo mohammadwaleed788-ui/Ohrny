@@ -11,6 +11,7 @@ export function AdminLayout({
   onToggleAnon = () => {},
   onRouteChange = () => {},
   onSignOut = () => {},
+  badgeOverrides = {},
 }) {
   const [collapsed, setCollapsed] = useState(false)
 
@@ -22,6 +23,7 @@ export function AdminLayout({
           onRouteChange={onRouteChange}
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((v) => !v)}
+          badgeOverrides={badgeOverrides}
         />
         <main className={`min-w-0 ${adminTokens.bg}`}>
           <AdminTopbar crumbs={crumbs} anon={anon} onToggleAnon={onToggleAnon} onSignOut={onSignOut} />

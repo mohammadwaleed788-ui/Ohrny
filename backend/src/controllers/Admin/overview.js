@@ -1,10 +1,10 @@
-import { sql, eq, and, gte, lte, count, isNull } from 'drizzle-orm'
+import { sql, eq, and, gte, lte, count, isNull, inArray } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { users } from '../../../db/schema/users.js'
 import { matches } from '../../../db/schema/matching.js'
 import { likes } from '../../../db/schema/matching.js'
 import { userSubscriptions, inAppPurchases } from '../../../db/schema/subscriptions.js'
-import { reports } from '../../../db/schema/safety.js'
+import { appeals, reports, userEnforcements } from '../../../db/schema/safety.js'
 import { userDevices } from '../../../db/schema/userDevices.js'
 import { getIO } from '../../socket/index.js'
 
@@ -239,6 +239,22 @@ export async function getOverview(req, res) {
       .select({ openReports: count() })
       .from(reports)
       .where(eq(reports.status, 'pending'))
+
+    const slaLimit = new Date(now.getTime() - 12 * 60 * 60 * 1000)
+    const [{ slaBreaches }] = await db
+      .select({ slaBreaches: count() })
+      .from(reports)
+      .where(and(eq(reports.status, 'pending'), lte(reports.createdAt, slaLimit)))
+
+    const [{ bansToday }] = await db
+      .select({ bansToday: count() })
+      .from(userEnforcements)
+      .where(and(inArray(userEnforcements.action, ['hard_ban', 'timed_pause']), gte(userEnforcements.createdAt, today)))
+
+    const [{ appealsOpen }] = await db
+      .select({ appealsOpen: count() })
+      .from(appeals)
+      .where(eq(appeals.status, 'open'))
 
     const [{ reportsYesterday }] = await db
       .select({ reportsYesterday: count() })
@@ -559,6 +575,21 @@ export async function getOverview(req, res) {
           v: formatNum(Number(openReports)),
           d: `+${Math.max(0, Number(openReports) - Number(reportsYesterday))}`,
           t: 'since yesterday',
+        },
+        slaBreaches: {
+          v: formatNum(Number(slaBreaches)),
+          d: '+0',
+          t: '>12h open',
+        },
+        bansToday: {
+          v: formatNum(Number(bansToday)),
+          d: '+0',
+          t: 'hard ban + pause',
+        },
+        appealsOpen: {
+          v: formatNum(Number(appealsOpen)),
+          d: '+0',
+          t: 'open appeals',
         },
       },
       dauChart: {

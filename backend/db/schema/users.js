@@ -74,6 +74,8 @@ export const users = pgTable('users', {
 
   // ── Account state ──────────────────────────────────────────────────────────
   isBanned:             boolean('is_banned').notNull().default(false),
+  bannedByAdminId:      uuid('banned_by_admin_id'),
+  banReason:            text('ban_reason'),
   isPaused:             boolean('is_paused').notNull().default(false),
   pausedUntil:          timestamp('paused_until', { withTimezone: true }),
   deletedAt:            timestamp('deleted_at', { withTimezone: true }),  // soft delete

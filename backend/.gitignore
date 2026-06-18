@@ -30,3 +30,5 @@ Thumbs.db
 # Local seed scripts
 seed.js
 
+test/
+

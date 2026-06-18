@@ -2,7 +2,7 @@ import { and, eq, isNull, or } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { likes, matches } from '../../../db/schema/matching.js'
 import { messages } from '../../../db/schema/messaging.js'
-import { blocks, reports } from '../../../db/schema/safety.js'
+import { appeals, blocks, reports, userEnforcements } from '../../../db/schema/safety.js'
 import { getIO } from '../../socket/index.js'
 
 const VALID_REASONS = ['fake', 'inappropriate', 'harassment', 'minor', 'spam', 'safety', 'other']
@@ -116,5 +116,50 @@ export async function blockUser(req, res) {
   } catch (err) {
     console.error('blockUser error:', err.message)
     return res.status(500).json({ error: 'Failed to block user' })
+  }
+}
+
+// ── POST /user/appeals ─────────────────────────────────────────
+// User submits an appeal for a currently active enforcement.
+export async function createAppeal(req, res) {
+  try {
+    const userId = req.user.id
+    const enforcementId = String(req.body?.enforcementId || '').trim()
+    const statement = String(req.body?.statement || '').trim()
+
+    if (!enforcementId) return res.status(400).json({ error: 'enforcementId required' })
+    if (!statement) return res.status(400).json({ error: 'statement required' })
+    if (statement.length > 2000) return res.status(400).json({ error: 'statement too long' })
+
+    const [enforcement] = await db
+      .select({ id: userEnforcements.id, active: userEnforcements.active })
+      .from(userEnforcements)
+      .where(and(eq(userEnforcements.id, enforcementId), eq(userEnforcements.userId, userId)))
+      .limit(1)
+
+    if (!enforcement) return res.status(404).json({ error: 'Enforcement not found' })
+    if (!enforcement.active) return res.status(400).json({ error: 'Enforcement is no longer active' })
+
+    const existing = await db
+      .select({ id: appeals.id })
+      .from(appeals)
+      .where(and(eq(appeals.enforcementId, enforcementId), eq(appeals.status, 'open')))
+      .limit(1)
+
+    if (existing[0]) return res.status(409).json({ error: 'An open appeal already exists' })
+
+    const [created] = await db
+      .insert(appeals)
+      .values({
+        enforcementId,
+        userId,
+        statement,
+      })
+      .returning({ id: appeals.id, status: appeals.status, createdAt: appeals.createdAt })
+
+    return res.json({ ok: true, appeal: created })
+  } catch (err) {
+    console.error('createAppeal error:', err.message)
+    return res.status(500).json({ error: 'Failed to submit appeal' })
   }
 }

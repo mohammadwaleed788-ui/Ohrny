@@ -1,0 +1,1 @@
+DROP TABLE "admin_audit_logs" CASCADE;

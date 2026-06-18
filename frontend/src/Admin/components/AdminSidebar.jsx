@@ -32,23 +32,23 @@ const NAV = [
     group: 'Operations',
     items: [
       { id: 'users', label: 'Users', icon: 'users' },
-      { id: 'trust', label: 'Trust & Safety', icon: 'shield', badge: '342', hot: true },
+      { id: 'trust', label: 'Trust & Safety', icon: 'shield', hot: true },
       { id: 'moderation', label: 'Content review', icon: 'flag', badge: '87' },
-      { id: 'support', label: 'Support', icon: 'tickets', badge: '29' },
+      { id: 'support', label: 'Support', icon: 'tickets' },
     ],
   },
-  {
-    group: 'Product',
-    items: [
-      { id: 'notifications', label: 'Notifications', icon: 'send' },
-      { id: 'algorithm', label: 'Algorithm', icon: 'sliders' },
-      { id: 'plans', label: 'Plans & limits', icon: 'dollar' },
-    ],
-  },
-  {
-    group: 'Organization',
-    items: [{ id: 'team', label: 'Team', icon: 'users' }],
-  },
+  // {
+  //   group: 'Product',
+  //   items: [
+  //     { id: 'notifications', label: 'Notifications', icon: 'send' },
+  //     { id: 'algorithm', label: 'Algorithm', icon: 'sliders' },
+  //     { id: 'plans', label: 'Plans & limits', icon: 'dollar' },
+  //   ],
+  // },
+  // {
+  //   group: 'Organization',
+  //   items: [{ id: 'team', label: 'Team', icon: 'users' }],
+  // },
 ]
 
 const ICONS = {
@@ -158,6 +158,7 @@ export function AdminSidebar({
   onRouteChange = () => {},
   collapsed = false,
   onToggleCollapse = () => {},
+  badgeOverrides = {},
 }) {
   return (
     <aside className={`sticky top-0 flex h-screen flex-col border-r ${adminTokens.borderSoft} bg-[oklch(0.155_0.008_260)]`}>
@@ -169,6 +170,7 @@ export function AdminSidebar({
             {!collapsed && <div className={`px-2 py-2 text-[10px] uppercase tracking-[0.14em] ${adminTokens.textMute}`}>{group.group}</div>}
             {group.items.map((item) => {
               const IconComp = ICONS[item.icon] || LayoutDashboard
+              const itemBadge = badgeOverrides[item.id] ?? item.badge
               return (
                 <button
                   key={item.id}
@@ -184,9 +186,9 @@ export function AdminSidebar({
                     <IconComp className="h-4 w-4" />
                   </span>
                   {!collapsed && <span className="flex-1 truncate text-left">{item.label}</span>}
-                  {!collapsed && item.badge && (
+                  {!collapsed && itemBadge && (
                     <span className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] ${item.hot ? 'bg-[oklch(0.7_0.19_25_/_0.14)] text-[oklch(0.7_0.19_25)]' : 'bg-[oklch(0.235_0.012_260)] text-[oklch(0.72_0.01_260)]'}`}>
-                      {item.badge}
+                      {itemBadge}
                     </span>
                   )}
                 </button>

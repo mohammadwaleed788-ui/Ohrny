@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Search, Download, Filter, ChevronLeft, ChevronRight, X, MoreHorizontal } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, X, MoreHorizontal } from 'lucide-react'
 import { PageHead } from '../components/PageHead'
 import { adminTokens } from '../theme/tokens'
 import { apiGet, apiPost } from '../../services/apiClient'
@@ -88,11 +88,16 @@ function UserDrawer({ userId, onClose, onUserUpdated }) {
     platform: 'ios',
     expiryPreset: '365d',
   })
-  const [purchaseForm, setPurchaseForm] = useState({
-    type: 'super_likes',
+  const [superLikesForm, setSuperLikesForm] = useState({
     quantity: 5,
     platform: 'ios',
   })
+  const [boostsForm, setBoostsForm] = useState({
+    quantity: 3,
+    platform: 'ios',
+  })
+  const [showUnbanConfirm, setShowUnbanConfirm] = useState(false)
+  const [unbanNote, setUnbanNote] = useState('')
 
   const loadUserDetail = useCallback(async () => {
     const detail = await apiGet(`/admin/users/${userId}`)
@@ -158,15 +163,36 @@ function UserDrawer({ userId, onClose, onUserUpdated }) {
     )
   }, [userId, withAction])
 
-  const grantConsumables = useCallback(async () => {
+  const grantSuperLikes = useCallback(async () => {
     await withAction(
       () => apiPost(`/admin/users/${userId}/consumables/grant`, {
-        ...purchaseForm,
-        quantity: Number(purchaseForm.quantity || 0),
+        type: 'super_likes',
+        quantity: Number(superLikesForm.quantity || 0),
+        platform: superLikesForm.platform,
       }),
-      'Consumables granted successfully.',
+      'Super Likes granted successfully.',
     )
-  }, [userId, purchaseForm, withAction])
+  }, [userId, superLikesForm, withAction])
+
+  const grantBoosts = useCallback(async () => {
+    await withAction(
+      () => apiPost(`/admin/users/${userId}/consumables/grant`, {
+        type: 'boosts',
+        quantity: Number(boostsForm.quantity || 0),
+        platform: boostsForm.platform,
+      }),
+      'Boosts granted successfully.',
+    )
+  }, [boostsForm, userId, withAction])
+
+  const unbanUser = useCallback(async () => {
+    await withAction(
+      () => apiPost(`/admin/trust/users/${userId}/unban`, { note: unbanNote.trim() }),
+      'User unbanned successfully.',
+    )
+    setShowUnbanConfirm(false)
+    setUnbanNote('')
+  }, [unbanNote, userId, withAction])
 
   if (!userId) return null
 
@@ -198,6 +224,19 @@ function UserDrawer({ userId, onClose, onUserUpdated }) {
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            {(user.status === 'banned' || user.status === 'paused') && (
+              <div className={`border-b ${adminTokens.borderSoft} px-5 py-3`}>
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => setShowUnbanConfirm(true)}
+                  className="rounded-lg border border-emerald-500/45 bg-emerald-500/20 px-3.5 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-60"
+                >
+                  Unban user
+                </button>
+              </div>
+            )}
 
             {/* Tabs */}
             <div className={`flex border-b ${adminTokens.borderSoft} px-5`}>
@@ -371,27 +410,19 @@ function UserDrawer({ userId, onClose, onUserUpdated }) {
                   </section>
 
                   <section className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev2} p-3`}>
-                    <div className={`mb-2 text-[11px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Grant consumables</div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <select
-                        value={purchaseForm.type}
-                        onChange={(e) => setPurchaseForm((s) => ({ ...s, type: e.target.value }))}
-                        className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
-                      >
-                        <option value="super_likes">Super Likes</option>
-                        <option value="boosts">Boosts</option>
-                      </select>
+                    <div className={`mb-2 text-[11px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Grant super likes</div>
+                    <div className="grid grid-cols-2 gap-2">
                       <input
                         type="number"
                         min={1}
                         max={1000}
-                        value={purchaseForm.quantity}
-                        onChange={(e) => setPurchaseForm((s) => ({ ...s, quantity: e.target.value }))}
+                        value={superLikesForm.quantity}
+                        onChange={(e) => setSuperLikesForm((s) => ({ ...s, quantity: e.target.value }))}
                         className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
                       />
                       <select
-                        value={purchaseForm.platform}
-                        onChange={(e) => setPurchaseForm((s) => ({ ...s, platform: e.target.value }))}
+                        value={superLikesForm.platform}
+                        onChange={(e) => setSuperLikesForm((s) => ({ ...s, platform: e.target.value }))}
                         className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
                       >
                         <option value="ios">iOS</option>
@@ -400,16 +431,89 @@ function UserDrawer({ userId, onClose, onUserUpdated }) {
                       </select>
                     </div>
                     <button
-                      onClick={grantConsumables}
+                      onClick={grantSuperLikes}
                       disabled={actionLoading}
                       className="mt-2 rounded-lg bg-[oklch(0.72_0.15_25)] px-3 py-1.5 text-xs font-medium text-[oklch(0.18_0.04_25)] disabled:opacity-60"
                     >
-                      {actionLoading ? 'Working…' : 'Grant consumables'}
+                      {actionLoading ? 'Working…' : 'Grant super likes'}
+                    </button>
+                  </section>
+
+                  <section className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev2} p-3`}>
+                    <div className={`mb-2 text-[11px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Grant boosts</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={boostsForm.quantity}
+                        onChange={(e) => setBoostsForm((s) => ({ ...s, quantity: e.target.value }))}
+                        className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
+                      />
+                      <select
+                        value={boostsForm.platform}
+                        onChange={(e) => setBoostsForm((s) => ({ ...s, platform: e.target.value }))}
+                        className={`rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev} px-2 py-1.5 text-xs ${adminTokens.text}`}
+                      >
+                        <option value="ios">iOS</option>
+                        <option value="android">Android</option>
+                        <option value="web">Web</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={grantBoosts}
+                      disabled={actionLoading}
+                      className="mt-2 rounded-lg bg-[oklch(0.72_0.15_25)] px-3 py-1.5 text-xs font-medium text-[oklch(0.18_0.04_25)] disabled:opacity-60"
+                    >
+                      {actionLoading ? 'Working…' : 'Grant boosts'}
                     </button>
                   </section>
                 </div>
               )}
             </div>
+
+            {showUnbanConfirm && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/55 p-4">
+                <div className={`w-full max-w-[360px] rounded-xl border ${adminTokens.borderSoft} ${adminTokens.bgElev} p-4 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.9)]`}>
+                  <div className={`text-sm font-semibold ${adminTokens.text}`}>Confirm unban</div>
+                  <div className={`mt-1 text-xs ${adminTokens.textMute}`}>
+                    This will remove active enforcement and restore account access.
+                  </div>
+
+                  <label className="mt-3 block">
+                    <span className={`mb-1 block text-[11px] font-semibold uppercase tracking-wide ${adminTokens.textMute}`}>Admin note (optional)</span>
+                    <textarea
+                      value={unbanNote}
+                      onChange={(e) => setUnbanNote(e.target.value)}
+                      className={`h-20 w-full rounded-lg border ${adminTokens.borderSoft} ${adminTokens.bgElev2} px-2.5 py-2 text-xs ${adminTokens.text} outline-none`}
+                      placeholder="Reason for unban..."
+                    />
+                  </label>
+
+                  <div className="mt-3 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      className={`rounded-lg px-3 py-1.5 text-xs ${adminTokens.bgElev2} ${adminTokens.textDim}`}
+                      onClick={() => {
+                        setShowUnbanConfirm(false)
+                        setUnbanNote('')
+                      }}
+                      disabled={actionLoading}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg bg-emerald-500/85 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                      onClick={unbanUser}
+                      disabled={actionLoading}
+                    >
+                      {actionLoading ? 'Working…' : 'Confirm unban'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </aside>

@@ -11,6 +11,8 @@ import { assertFeature } from '../../services/entitlementService.js'
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
 const EARTH_RADIUS_MI = 3958.8
+const OPERATED_PHONE_PREFIX = '555019'
+const OPERATED_PHONE_COUNTRY = '+1'
 
 function clampInt(value, min, max, fallback) {
   const n = Number(value)
@@ -62,6 +64,23 @@ function sortPair(user1, user2) {
   return String(user1) < String(user2)
     ? { userAId: user1, userBId: user2 }
     : { userAId: user2, userBId: user1 }
+}
+
+async function isOperatedPersona(userId) {
+  const [row] = await db
+    .select({
+      phone: users.phone,
+      phoneCountry: users.phoneCountry,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+
+  return Boolean(
+    row
+      && row.phoneCountry === OPERATED_PHONE_COUNTRY
+      && String(row.phone || '').startsWith(OPERATED_PHONE_PREFIX),
+  )
 }
 
 async function findVisibleInboundLike(userId, fromUserId) {
@@ -596,7 +615,12 @@ export async function likeBack(req, res) {
   try {
     const userId = req.user.id
     const access = await assertFeature(userId, 'canSeeLikes')
-    if (!access.ok) return res.status(access.status).json(access.body)
+    if (!access.ok) {
+      // Operated personas are internal QA/admin test accounts. They should be
+      // able to like back from the operated dashboard even without a paid sub.
+      const bypassAllowed = access.status === 403 && await isOperatedPersona(userId)
+      if (!bypassAllowed) return res.status(access.status).json(access.body)
+    }
 
     const fromUserId = req.params.fromUserId
     if (!fromUserId) return res.status(400).json({ error: 'Invalid user' })

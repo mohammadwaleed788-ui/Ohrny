@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { AdminLayout } from './AdminLayout'
 import { routeCrumbs } from './config/adminNavigation'
+import { apiGet } from '../services/apiClient'
 import {
   AlgorithmPage,
   ExperimentsPage,
@@ -46,6 +47,7 @@ export default function AdminApp() {
   const { logout } = useAuth()
   const [route, setRoute] = useState('overview')
   const [anon, setAnon] = useState(true)
+  const [badgeOverrides, setBadgeOverrides] = useState({})
 
   const crumbs = useMemo(() => ['Ohrny admin', ...(routeCrumbs[route] ?? [route])], [route])
   const ActivePage = PAGE_COMPONENTS[route]
@@ -55,6 +57,36 @@ export default function AdminApp() {
     navigate('/', { replace: true })
   }
 
+  const refreshSidebarBadges = useCallback(async () => {
+    try {
+      const [overviewResult, supportResult] = await Promise.all([
+        apiGet('/admin/overview?range=7d'),
+        apiGet('/admin/support/summary'),
+      ])
+      const openReportsRaw = String(overviewResult?.kpis?.openReports?.v || '').replace(/,/g, '')
+      const openReports = Number.parseInt(openReportsRaw, 10)
+      const openTickets = Number.parseInt(String(supportResult?.openTickets || '0'), 10)
+      setBadgeOverrides((current) => ({
+        ...current,
+        ...(Number.isFinite(openReports) ? { trust: String(openReports) } : {}),
+        ...(Number.isFinite(openTickets) ? { support: String(openTickets) } : {}),
+      }))
+    } catch (err) {
+      console.error('Sidebar badge refresh failed:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    const startupId = setTimeout(() => {
+      refreshSidebarBadges()
+    }, 0)
+    const id = setInterval(refreshSidebarBadges, 30000)
+    return () => {
+      clearTimeout(startupId)
+      clearInterval(id)
+    }
+  }, [refreshSidebarBadges])
+
   return (
     <AdminLayout
       route={route}
@@ -63,6 +95,7 @@ export default function AdminApp() {
       onToggleAnon={() => setAnon((value) => !value)}
       onRouteChange={setRoute}
       onSignOut={handleSignOut}
+      badgeOverrides={badgeOverrides}
     >
       {ActivePage ? <ActivePage /> : <FallbackPage route={route} />}
     </AdminLayout>

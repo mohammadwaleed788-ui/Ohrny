@@ -5,6 +5,8 @@ import adminOverviewRoutes from './Admin/overview.js'
 import adminMatchesRoutes from './Admin/matches.js'
 import adminUsersRoutes from './Admin/users.js'
 import adminOperatedRoutes from './Admin/operated.js'
+import adminTrustRoutes from './Admin/trust.js'
+import adminSupportRoutes from './Admin/support.js'
 import memberAuthRoutes from './User/auth.js'
 import memberS3Routes from './User/s3.js'
 import memberDeviceRoutes from './User/device.js'
@@ -17,6 +19,7 @@ import memberSafetyRoutes from './User/safety.js'
 import memberEntitlementRoutes from './User/entitlements.js'
 import memberBoostRoutes from './User/boosts.js'
 import memberTravelRoutes from './User/travel.js'
+import memberSupportRoutes from './User/support.js'
 import revenueCatRoutes from './Shared/revenuecat.js'
 
 const router = Router()
@@ -27,6 +30,8 @@ router.use('/admin', staffAuthRoutes)
 router.use('/admin', adminOverviewRoutes)
 router.use('/admin', adminMatchesRoutes)
 router.use('/admin', adminUsersRoutes)
+router.use('/admin', adminTrustRoutes)
+router.use('/admin', adminSupportRoutes)
 router.use('/admin/operated', adminOperatedRoutes)
 router.use('/user', memberAuthRoutes)
 router.use('/user', memberS3Routes)
@@ -38,6 +43,7 @@ router.use('/user', memberSafetyRoutes)
 router.use('/user', memberEntitlementRoutes)
 router.use('/user', memberBoostRoutes)
 router.use('/user', memberTravelRoutes)
+router.use('/user', memberSupportRoutes)
 router.use('/user/devices', memberDeviceRoutes)
 router.use('/user/photos', memberPhotoRoutes)
 
