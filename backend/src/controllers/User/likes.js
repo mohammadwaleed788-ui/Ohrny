@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { likes, matches } from '../../../db/schema/matching.js'
+import { messages } from '../../../db/schema/messaging.js'
 import { users, userPhotos } from '../../../db/schema/users.js'
 import { userPrivacySettings } from '../../../db/schema/settings.js'
 import { blocks } from '../../../db/schema/safety.js'
@@ -408,9 +409,27 @@ export async function getLikesActivity(req, res) {
         ),
       )
 
+    // Unread conversations — distinct active matches with ≥1 unread message
+    // from the partner. Drives the Messages tab badge WITHOUT loading the list.
+    const [chatRow] = await db
+      .select({ unreadChats: sql`count(distinct ${messages.matchId})::int` })
+      .from(messages)
+      .innerJoin(matches, eq(matches.id, messages.matchId))
+      .where(
+        and(
+          eq(matches.isActive, true),
+          or(eq(matches.userAId, userId), eq(matches.userBId, userId)),
+          sql`${messages.senderId} <> ${userId}`,
+          eq(messages.isRead, false),
+          isNull(messages.deletedAt),
+          sql`(${messages.deletedForUserId} is null or ${messages.deletedForUserId} <> ${userId})`,
+        ),
+      )
+
     return res.json({
       newLikes: Number(likeRow?.newLikes || 0),
       newMatches: Number(matchRow?.newMatches || 0),
+      unreadChats: Number(chatRow?.unreadChats || 0),
     })
   } catch (err) {
     console.error(err)
