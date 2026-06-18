@@ -68,6 +68,8 @@ export async function getMatches(req, res) {
         matchedAt: matches.matchedAt,
         photosUnlocked: matches.photosUnlocked,
         photosUnlockedAt: matches.photosUnlockedAt,
+        userASeenMatch: matches.userASeenMatch,
+        userBSeenMatch: matches.userBSeenMatch,
         userAUnlockRequested: matches.userAUnlockRequested,
         userBUnlockRequested: matches.userBUnlockRequested,
         messageCountUserA: matches.messageCountUserA,
@@ -163,6 +165,10 @@ export async function getMatches(req, res) {
           matchId: row.matchId,
           matchedAt: row.matchedAt,
           updatedAt: row.updatedAt,
+          // Persisted per-viewer "new match seen" flag — drives the new-match
+          // circle row. Set true the first time the user opens the match (from
+          // the circle OR the chat row), so it never reappears after restart.
+          seen: isUserA ? Boolean(row.userASeenMatch) : Boolean(row.userBSeenMatch),
           photosUnlocked: row.photosUnlocked,
           unlockRequested: isUserA ? row.userAUnlockRequested : row.userBUnlockRequested,
           partnerUnlockRequested: isUserA ? row.userBUnlockRequested : row.userAUnlockRequested,
