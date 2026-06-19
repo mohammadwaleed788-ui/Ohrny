@@ -5,6 +5,7 @@ import { db } from '../../db/index.js'
 import { matches } from '../../db/schema/matching.js'
 import { calls, messages } from '../../db/schema/messaging.js'
 import { users } from '../../db/schema/users.js'
+import { supportTickets } from '../../db/schema/support.js'
 import { notifyNewMessage, notifyPhotoUnlockRequest } from '../services/notifications/chatNotification.js'
 import { assertCanMessage, assertFeature, getEffectiveEntitlements } from '../services/entitlementService.js'
 
@@ -114,6 +115,35 @@ export async function isUserReadingMatch(userId, matchId) {
 
   const sockets = await io.in(`user:${userId}`).fetchSockets()
   return sockets.some((socket) => socket.data?.activeMatchId === matchId)
+}
+
+// True when the user currently has the given support ticket open (in its room).
+export async function isUserReadingTicket(userId, ticketId) {
+  if (!io || !userId || !ticketId) return false
+
+  const sockets = await io.in(`user:${userId}`).fetchSockets()
+  return sockets.some((socket) => socket.data?.activeTicketId === ticketId)
+}
+
+// Called by the admin reply controller: push the new reply to the ticket room
+// (live thread) and a lightweight nudge to the user's room (badge refresh).
+export function emitSupportReply({ ticketId, userId, message }) {
+  if (!io || !ticketId) return
+  if (message) io.to(`support:${ticketId}`).emit('support:message', message)
+  if (userId) io.to(`user:${userId}`).emit('support:reply', { ticketId })
+}
+
+// Join a socket to a support ticket room — only if it owns the ticket.
+async function joinSocketToTicketIfOwner(socket, ticketId) {
+  if (!ticketId) return false
+  const [t] = await db
+    .select({ requesterUserId: supportTickets.requesterUserId })
+    .from(supportTickets)
+    .where(eq(supportTickets.id, ticketId))
+    .limit(1)
+  if (!t || t.requesterUserId !== socket.userId) return false
+  socket.join(`support:${ticketId}`)
+  return true
 }
 
 async function joinSocketToMatchIfMember(socket, matchId) {
@@ -263,6 +293,43 @@ export function initSocket(server) {
       const { matchId } = data || {}
       if (!matchId || socket.data.activeMatchId === matchId) {
         socket.data.activeMatchId = null
+      }
+      ack?.({ ok: true })
+    })
+
+    // ── support:open / support:close — join the ticket room + presence ──
+    socket.on('support:open', async (data, ack) => {
+      try {
+        const { ticketId } = data || {}
+        const ok = await joinSocketToTicketIfOwner(socket, ticketId)
+        if (ok) {
+          socket.data.activeTicketId = ticketId
+          touchLastActive(userId)
+          // Tell the room (admins, once implemented) the user is viewing.
+          io.to(`support:${ticketId}`).emit('support:presence', {
+            ticketId,
+            userId,
+            online: true,
+          })
+        }
+        ack?.({ ok })
+      } catch (err) {
+        console.error('support:open error:', err.message)
+        ack?.({ ok: false })
+      }
+    })
+
+    socket.on('support:close', (data, ack) => {
+      const { ticketId } = data || {}
+      if (!ticketId || socket.data.activeTicketId === ticketId) {
+        socket.data.activeTicketId = null
+      }
+      if (ticketId) {
+        io.to(`support:${ticketId}`).emit('support:presence', {
+          ticketId,
+          userId,
+          online: false,
+        })
       }
       ack?.({ ok: true })
     })

@@ -42,6 +42,8 @@ function serializeUserTicket(row) {
     severity: row.severity,
     status: row.status,
     age: formatRelative(row.created_at),
+    // True when there's an admin reply the user hasn't read yet (list only).
+    unread: Boolean(row.unread),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     closedAt: row.closed_at,
@@ -157,7 +159,14 @@ export async function listUserSupportTickets(req, res) {
         status,
         closed_at,
         created_at,
-        updated_at
+        updated_at,
+        EXISTS (
+          SELECT 1 FROM support_ticket_messages m
+          WHERE m.ticket_id = support_tickets.id
+            AND m.author_admin_id IS NOT NULL
+            AND m.is_internal = false
+            AND m.created_at > COALESCE(support_tickets.last_user_read_at, support_tickets.created_at)
+        ) AS unread
       FROM support_tickets
       WHERE requester_user_id = ${userId}
         AND (${whereStatus}::text IS NULL OR status = ${whereStatus})
@@ -180,6 +189,12 @@ export async function getUserSupportTicketDetail(req, res) {
     const { ticketId } = req.params
     const ticket = await getOwnedTicket(ticketId, userId)
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' })
+
+    // Opening the ticket marks it read — admin replies up to now are no longer
+    // unread (clears the app badge for this ticket).
+    await db.execute(sql`
+      UPDATE support_tickets SET last_user_read_at = NOW() WHERE id = ${ticketId}
+    `)
 
     const messagesResult = await db.execute(sql`
       SELECT

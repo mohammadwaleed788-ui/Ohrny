@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
+import { emitSupportReply, isUserReadingTicket } from '../../socket/index.js'
+import { notifySupportReply } from '../../services/notifications/supportNotification.js'
 
 const ALLOWED_STATUS = new Set(['open', 'waiting', 'closed'])
 const ALLOWED_SEVERITY = new Set(['low', 'medium', 'high'])
@@ -490,7 +492,7 @@ export async function replySupportTicket(req, res) {
     if (body.length > 4000) return res.status(400).json({ error: 'Reply is too long' })
 
     const now = new Date()
-    await db.execute(sql`
+    const insertResult = await db.execute(sql`
       INSERT INTO support_ticket_messages (
         ticket_id,
         author_admin_id,
@@ -506,7 +508,9 @@ export async function replySupportTicket(req, res) {
         ${isInternal},
         ${now}
       )
+      RETURNING id, created_at
     `)
+    const inserted = rows(insertResult)[0]
 
     if (isInternal) {
       await db.execute(sql`
@@ -523,6 +527,35 @@ export async function replySupportTicket(req, res) {
           updated_at = ${now}
         WHERE id = ${ticketId}
       `)
+
+      // Notify the requester: live socket push to the ticket + a badge nudge,
+      // and an FCM push when they're not currently viewing the ticket.
+      const requesterId = ticket.requester_user_id
+      if (requesterId) {
+        emitSupportReply({
+          ticketId,
+          userId: requesterId,
+          message: {
+            id: inserted?.id,
+            ticketId,
+            kind: 'reply',
+            body,
+            createdAt: inserted?.created_at || now,
+            author: {
+              type: 'admin',
+              id: req.admin?.id || null,
+              label: req.admin?.name || 'Support',
+            },
+          },
+        })
+        if (!(await isUserReadingTicket(requesterId, ticketId))) {
+          notifySupportReply(requesterId, {
+            ticketId,
+            ticketNo: ticket.ticket_no,
+            body,
+          })
+        }
+      }
     }
 
     return res.json({ ok: true })

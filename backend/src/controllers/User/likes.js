@@ -445,10 +445,26 @@ export async function getLikesActivity(req, res) {
         ),
       )
 
+    // Support tickets with an unread admin reply — drives the support badges.
+    const supportResult = await db.execute(sql`
+      SELECT COUNT(*)::int AS unread_support
+      FROM support_tickets t
+      WHERE t.requester_user_id = ${userId}
+        AND EXISTS (
+          SELECT 1 FROM support_ticket_messages m
+          WHERE m.ticket_id = t.id
+            AND m.author_admin_id IS NOT NULL
+            AND m.is_internal = false
+            AND m.created_at > COALESCE(t.last_user_read_at, t.created_at)
+        )
+    `)
+    const supportRow = (supportResult.rows || supportResult || [])[0]
+
     return res.json({
       newLikes: Number(likeRow?.newLikes || 0),
       newMatches: Number(matchRow?.newMatches || 0),
       unreadChats: Number(chatRow?.unreadChats || 0),
+      unreadSupport: Number(supportRow?.unread_support || 0),
     })
   } catch (err) {
     console.error(err)

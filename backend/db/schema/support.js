@@ -19,6 +19,9 @@ export const supportTickets = pgTable('support_tickets', {
   assigneeAdminId:   uuid('assignee_admin_id').references(() => adminUsers.id, { onDelete: 'set null' }),
   firstRespondedAt:  timestamp('first_responded_at', { withTimezone: true }),
   lastMessageAt:     timestamp('last_message_at', { withTimezone: true }).notNull().defaultNow(),
+  // When the requester (mobile user) last opened/read this ticket. Admin
+  // replies after this time are "unread" for the user (drives the app badges).
+  lastUserReadAt:    timestamp('last_user_read_at', { withTimezone: true }),
   closedAt:          timestamp('closed_at', { withTimezone: true }),
   csatScore:         smallint('csat_score'),
   createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
