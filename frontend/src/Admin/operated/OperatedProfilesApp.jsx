@@ -105,7 +105,9 @@ export default function OperatedProfilesApp() {
       kids: nextPersona.kids,
       edu: nextPersona.edu,
       interests: Array.isArray(nextPersona.interests) ? nextPersona.interests : [],
-      photos: Array.isArray(nextPersona.photosList) ? nextPersona.photosList : undefined,
+      photos: Array.isArray(nextPersona.photosList)
+        ? nextPersona.photosList.filter((photo) => photo?.storageKey && String(photo.storageKey).trim())
+        : undefined,
     }
     const { persona: saved } = await adminPatch(`/admin/operated/personas/${nextPersona.id}`, payload)
     let refreshed = saved

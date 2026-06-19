@@ -127,6 +127,13 @@
       "when": 1781780000000,
       "tag": "0017_support_last_user_read_at",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781860000000,
+      "tag": "0018_remove_operated_placeholder_photos",
+      "breakpoints": true
     }
   ]
 }

@@ -84,8 +84,13 @@ function normalizeOrientation(value) {
   return [...new Set(mapped)].length ? [...new Set(mapped)] : ['everyone']
 }
 
-function defaultPhotoStorage(handle, position) {
-  return `operated/${handle}/photo-${position}.jpg`
+function isPlaceholderStorageKey(storageKey) {
+  return /^operated\/[^/]+\/photo-\d+\.jpg$/i.test(String(storageKey || '').trim())
+}
+
+function isPersistablePhoto(photo) {
+  const key = String(photo?.storageKey || '').trim()
+  return key.length > 0 && !isPlaceholderStorageKey(key)
 }
 
 function mapPersona(row, extras = {}) {
@@ -137,8 +142,9 @@ async function loadPersona(userId) {
     db.select().from(userInterests).where(eq(userInterests.userId, userId)).orderBy(asc(userInterests.position)),
   ])
 
+  const realPhotos = photos.filter((photo) => !isPlaceholderStorageKey(photo?.storageKey))
   const photosWithUrl = await Promise.all(
-    photos.map(async (photo) => {
+    realPhotos.map(async (photo) => {
       if (!photo?.storageKey) return photo
       try {
         const url = await generateSignedReadUrl(photo.storageKey)
@@ -248,7 +254,7 @@ export async function createPersona(req, res) {
     const relStatus = normalizeRelStatus(body.relStatus)
     const orientation = normalizeOrientation(body.orientation)
     const interests = Array.isArray(body.interests) ? body.interests : []
-    const photos = Array.isArray(body.photos) && body.photos.length ? body.photos : [1, 2, 3].map((position) => ({ position }))
+    const photos = Array.isArray(body.photos) ? body.photos : []
     const prompts = Array.isArray(body.prompts) && body.prompts.length
       ? body.prompts
       : [
@@ -304,16 +310,19 @@ export async function createPersona(req, res) {
         globalMode: Boolean(body.globalMode),
       })
 
-      await tx.insert(userPhotos).values(
-        photos.slice(0, 6).map((photo, index) => ({
-          userId: inserted.id,
-          position: clampInt(photo.position, 1, 6, index + 1),
-          storageKey: photo.storageKey ? String(photo.storageKey).slice(0, 512) : defaultPhotoStorage(handle, index + 1),
-          isBlurred: photo.isBlurred ?? false,
-          blurAmount: clampInt(photo.blurAmount, 0, 100, 0),
-          isMain: index === 0,
-        })),
-      )
+      const persistablePhotos = photos.slice(0, 6).filter(isPersistablePhoto)
+      if (persistablePhotos.length) {
+        await tx.insert(userPhotos).values(
+          persistablePhotos.map((photo, index) => ({
+            userId: inserted.id,
+            position: index + 1,
+            storageKey: String(photo.storageKey).trim().slice(0, 512),
+            isBlurred: photo.isBlurred ?? false,
+            blurAmount: clampInt(photo.blurAmount, 0, 100, 0),
+            isMain: index === 0,
+          })),
+        )
+      }
 
       if (interests.length) {
         await tx.insert(userInterests).values(
@@ -419,12 +428,13 @@ export async function updatePersona(req, res) {
 
       if (Array.isArray(body.photos)) {
         await tx.delete(userPhotos).where(eq(userPhotos.userId, userId))
-        if (body.photos.length) {
+        const persistablePhotos = body.photos.slice(0, 6).filter(isPersistablePhoto)
+        if (persistablePhotos.length) {
           await tx.insert(userPhotos).values(
-            body.photos.slice(0, 6).map((photo, index) => ({
+            persistablePhotos.map((photo, index) => ({
               userId,
-              position: clampInt(photo.position, 1, 6, index + 1),
-              storageKey: photo.storageKey ? String(photo.storageKey).slice(0, 512) : defaultPhotoStorage(existing.handle, index + 1),
+              position: index + 1,
+              storageKey: String(photo.storageKey).trim().slice(0, 512),
               isBlurred: photo.isBlurred ?? false,
               blurAmount: clampInt(photo.blurAmount, 0, 100, 0),
               isMain: index === 0,

@@ -24,7 +24,6 @@ export function NewPersonaModal({ onClose, onCreate }) {
   const [smokes, setSmokes] = useState('No')
   const [kids, setKids] = useState('Open')
   const [interests, setInterests] = useState('coffee, music, books')
-  const [photoCount, setPhotoCount] = useState(3)
   const [maxDistance, setMaxDistance] = useState(25)
   const [ageMin, setAgeMin] = useState(18)
   const [ageMax, setAgeMax] = useState(70)
@@ -63,7 +62,6 @@ export function NewPersonaModal({ onClose, onCreate }) {
         smokes,
         kids,
         interests: cleanInterests,
-        photos: Array.from({ length: photoCount }, (_, index) => ({ position: index + 1 })),
         maxDistance,
         ageMin,
         ageMax,
@@ -88,7 +86,7 @@ export function NewPersonaModal({ onClose, onCreate }) {
           <Button className="h-8 w-8 px-0" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
         <div className="max-h-[calc(90vh-132px)] space-y-5 overflow-y-auto p-4">
-          <p className={`text-sm ${op.mute}`}>Creates a new company-operated profile. Disclosure and audit controls are added automatically.</p>
+          <p className={`text-sm ${op.mute}`}>Creates a new company-operated profile. Upload photos on the Profile tab after creation.</p>
           <div className="grid grid-cols-2 gap-3">
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Display name<input className={`mt-1 w-full ${fieldClass}`} value={name} onChange={(event) => setName(event.target.value)} /></label>
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Age<input className={`mt-1 w-full ${fieldClass}`} type="number" value={age} onChange={(event) => setAge(Number(event.target.value))} /></label>
@@ -117,8 +115,7 @@ export function NewPersonaModal({ onClose, onCreate }) {
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Kids<select className={`mt-1 w-full ${fieldClass}`} value={kids} onChange={(event) => setKids(event.target.value)}><option>Open</option><option>Wants</option><option>Wants someday</option><option>Has kids</option><option>Doesn't want</option></select></label>
           </div>
           <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Interests<input className={`mt-1 w-full ${fieldClass}`} value={interests} onChange={(event) => setInterests(event.target.value)} /></label>
-          <div className="grid grid-cols-4 gap-3">
-            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Photos<input className={`mt-1 w-full ${fieldClass}`} type="number" min="3" max="6" value={photoCount} onChange={(event) => setPhotoCount(Math.max(3, Math.min(6, Number(event.target.value))))} /></label>
+          <div className="grid grid-cols-3 gap-3">
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Distance<input className={`mt-1 w-full ${fieldClass}`} type="number" value={maxDistance} onChange={(event) => setMaxDistance(Number(event.target.value))} /></label>
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Age min<input className={`mt-1 w-full ${fieldClass}`} type="number" value={ageMin} onChange={(event) => setAgeMin(Number(event.target.value))} /></label>
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Age max<input className={`mt-1 w-full ${fieldClass}`} type="number" value={ageMax} onChange={(event) => setAgeMax(Number(event.target.value))} /></label>

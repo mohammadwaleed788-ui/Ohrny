@@ -51,6 +51,7 @@ export function ProfileView({ persona, onSave, userToken }) {
   const photosList = useMemo(() => {
     if (!Array.isArray(draft.photosList)) return []
     return [...draft.photosList]
+      .filter((photo) => photo?.storageKey && String(photo.storageKey).trim())
       .sort((a, b) => Number(a?.position || 0) - Number(b?.position || 0))
       .slice(0, 6)
   }, [draft.photosList])
@@ -60,15 +61,18 @@ export function ProfileView({ persona, onSave, userToken }) {
   const removeInterest = (interest) => set('interests', interests.filter((item) => item !== interest))
   const sharedBlurEnabled = Boolean(photosList[0]?.isBlurred)
   const sharedBlurAmount = sharedBlurEnabled ? normalizedBlur(photosList[0]) : 0
-  const applyPhotos = (nextPhotos) => setDraft((prev) => ({
-    ...prev,
-    photosList: nextPhotos.map((photo, index) => ({
-      ...photo,
-      position: index + 1,
-      isMain: index === 0,
-    })),
-    photos: nextPhotos.length,
-  }))
+  const applyPhotos = (nextPhotos) => {
+    const withKeys = nextPhotos.filter((photo) => photo?.storageKey && String(photo.storageKey).trim())
+    setDraft((prev) => ({
+      ...prev,
+      photosList: withKeys.map((photo, index) => ({
+        ...photo,
+        position: index + 1,
+        isMain: index === 0,
+      })),
+      photos: withKeys.length,
+    }))
+  }
   const applyBlurToAllPhotos = (isBlurred, blurAmount = 0) => {
     applyPhotos(photosList.map((photo) => ({
       ...photo,
@@ -113,7 +117,7 @@ export function ProfileView({ persona, onSave, userToken }) {
           isBlurred: sharedBlurEnabled,
         }
       }
-      applyPhotos(nextPhotos.filter(Boolean))
+      applyPhotos(nextPhotos)
     } catch (err) {
       setError(err.message || 'Image upload failed')
     } finally {
@@ -164,28 +168,23 @@ export function ProfileView({ persona, onSave, userToken }) {
           <div className="mt-4 grid grid-cols-6 gap-2">
             {Array.from({ length: 6 }, (_, index) => {
               const photo = photosList[index]
-              const filled = Boolean(photo)
+              const filled = Boolean(photo?.storageKey)
               return (
                 <button
                   key={index}
                   type="button"
-                  className={`relative grid aspect-[3/4] place-items-center overflow-hidden rounded-lg border ${op.borderSoft} text-xs ${filled ? 'text-white' : op.mute}`}
-                  style={filled ? avatarGradient((hue + index * 25) % 360) : undefined}
+                  className={`relative grid aspect-[3/4] place-items-center overflow-hidden rounded-lg border ${op.borderSoft} text-xs ${filled ? '' : op.mute}`}
                   onClick={() => triggerPhotoPicker(index)}
                   disabled={uploading || saving}
                 >
                   {filled ? (
-                    <>
-                      <img
-                        src={photoSrc(photo)}
-                        alt={`Photo ${index + 1}`}
-                        className="absolute inset-0 h-full w-full object-cover"
-                        style={{ filter: normalizedBlur(photo) ? `blur(${Math.round(normalizedBlur(photo) / 12)}px)` : undefined }}
-                        loading="lazy"
-                      />
-                      <div className="absolute inset-0 bg-black/20" />
-                      <span className="relative z-10 font-mono">{index + 1}</span>
-                    </>
+                    <img
+                      src={photoSrc(photo)}
+                      alt={`Photo ${index + 1}`}
+                      className="absolute inset-0 h-full w-full object-cover"
+                      style={{ filter: normalizedBlur(photo) ? `blur(${Math.round(normalizedBlur(photo) / 12)}px)` : undefined }}
+                      loading="lazy"
+                    />
                   ) : <span className="inline-flex items-center gap-1"><Plus className="h-3 w-3" /> upload</span>}
                 </button>
               )
