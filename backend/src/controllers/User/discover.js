@@ -672,8 +672,10 @@ export async function swipeDiscoverCard(req, res) {
       .set(pair.userAId === fromUserId ? { userASeenMatch: true } : { userBSeenMatch: true })
       .where(eq(matches.id, matchRow.id))
 
+    // Only the OTHER person is notified. The swiper (this user) caused the match
+    // and just saw the match screen, so pushing them an "It's a Match!"
+    // notification is redundant/confusing — skip it.
     notifyNewMatch(toUserId, fromUserId)
-    notifyNewMatch(fromUserId, toUserId)
     try {
       await attachUsersToMatchRoom([fromUserId, toUserId], matchRow.id)
     } catch (err) {

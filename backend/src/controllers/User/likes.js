@@ -725,8 +725,10 @@ export async function likeBack(req, res) {
       .set(pair.userAId === userId ? { userASeenMatch: true } : { userBSeenMatch: true })
       .where(eq(matches.id, matchRow.id))
 
+    // Only the OTHER person is notified. The like-back initiator (this user)
+    // caused the match and is already on the match screen, so pushing them an
+    // "It's a Match!" notification is redundant/confusing — skip it.
     notifyNewMatch(fromUserId, userId)
-    notifyNewMatch(userId, fromUserId)
     try {
       await attachUsersToMatchRoom([userId, fromUserId], matchRow.id)
     } catch (err) {
