@@ -873,6 +873,66 @@ function storeToPlatform(store) {
   return 'ios'
 }
 
+// Fetch a user's RevenueCat subscriber object from the V1 REST API. The single
+// source of truth for both subscription and one-time purchase verification, so
+// the client can never fake a plan or a Super-Like/Boost grant. Returns the
+// `subscriber` object, or null if not configured / unreachable / not found.
+async function fetchRevenueCatSubscriber(appUserId) {
+  if (!REVENUECAT_SECRET_KEY || !appUserId) return null
+  try {
+    const resp = await fetch(
+      `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`,
+      { headers: { Authorization: `Bearer ${REVENUECAT_SECRET_KEY}` } },
+    )
+    if (!resp.ok) {
+      console.error(`RevenueCat REST ${resp.status} for ${appUserId}`)
+      return null
+    }
+    const json = await resp.json()
+    return json?.subscriber || null
+  } catch (err) {
+    console.error('RevenueCat REST fetch failed:', err)
+    return null
+  }
+}
+
+// The RevenueCat app_user_id for a DB user: their stored revenueCatUserId, or
+// users.id (what the app logs in as). Persists the mapping when missing so the
+// webhook can later find the user by app_user_id too.
+async function resolveAppUserId(userId) {
+  const [u] = await db
+    .select({ id: users.id, revenueCatUserId: users.revenueCatUserId })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+  if (!u) return null
+  return { appUserId: u.revenueCatUserId || u.id, hadMapping: Boolean(u.revenueCatUserId) }
+}
+
+// Confirm a one-time purchase (Super Likes / Boosts) actually exists in
+// RevenueCat before crediting it. Returns true only when RevenueCat's
+// `non_subscriptions` lists this product with a matching store transaction id.
+// When the secret key isn't configured we return null = "can't verify" so the
+// caller can decide its fallback (the webhook is still authoritative).
+export async function verifyConsumableWithRevenueCat(userId, productId, transactionId) {
+  if (!REVENUECAT_SECRET_KEY) return null
+  const resolved = await resolveAppUserId(userId)
+  if (!resolved) return false
+  const subscriber = await fetchRevenueCatSubscriber(resolved.appUserId)
+  if (!subscriber) return false
+
+  const purchases = (subscriber.non_subscriptions || {})[String(productId)] || []
+  if (!Array.isArray(purchases) || purchases.length === 0) return false
+  // Match the exact transaction the client claims (prevents replaying a fake id
+  // for a product they never bought). RevenueCat exposes both its own id and the
+  // store's transaction id — accept either.
+  const txn = String(transactionId || '')
+  if (!txn) return false
+  return purchases.some(
+    (p) => String(p.store_transaction_id || '') === txn || String(p.id || '') === txn,
+  )
+}
+
 // Verify a user's subscription DIRECTLY with RevenueCat's REST API and apply it
 // to the DB immediately — the synchronous counterpart to the async webhook. The
 // app calls this right after a subscription purchase so premium unlocks at once
@@ -885,31 +945,15 @@ export async function syncSubscriptionFromRevenueCat(userId) {
 
   // We identify RevenueCat as users.id and persist it as revenueCatUserId on the
   // first webhook — either is a valid REST lookup key for the same subscriber.
-  const [u] = await db
-    .select({ id: users.id, revenueCatUserId: users.revenueCatUserId })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1)
-  if (!u) return { ok: false, reason: 'user_not_found' }
-  const appUserId = u.revenueCatUserId || u.id
+  const resolved = await resolveAppUserId(userId)
+  if (!resolved) return { ok: false, reason: 'user_not_found' }
+  const { appUserId, hadMapping } = resolved
 
-  let subscriber
-  try {
-    const resp = await fetch(
-      `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`,
-      { headers: { Authorization: `Bearer ${REVENUECAT_SECRET_KEY}` } },
-    )
-    if (!resp.ok) return { ok: false, reason: `revenuecat_http_${resp.status}` }
-    const json = await resp.json()
-    subscriber = json?.subscriber
-  } catch (err) {
-    console.error('RevenueCat REST fetch failed:', err)
-    return { ok: false, reason: 'revenuecat_unreachable' }
-  }
-  if (!subscriber) return { ok: false, reason: 'no_subscriber' }
+  const subscriber = await fetchRevenueCatSubscriber(appUserId)
+  if (!subscriber) return { ok: false, reason: 'revenuecat_unavailable' }
 
   // Persist the mapping so the webhook can find this user by app_user_id later.
-  if (!u.revenueCatUserId && appUserId) {
+  if (!hadMapping && appUserId) {
     await db
       .update(users)
       .set({ revenueCatUserId: appUserId, updatedAt: new Date() })

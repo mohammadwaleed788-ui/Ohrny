@@ -4,6 +4,7 @@ import {
   grantPurchase,
   normalizeConsumableProduct,
   syncSubscriptionFromRevenueCat,
+  verifyConsumableWithRevenueCat,
 } from '../../services/entitlementService.js'
 
 // Client-confirm fallback for one-time purchases (Boosts / Super Likes). The
@@ -22,6 +23,19 @@ export async function syncConsumablePurchase(req, res) {
     if (!consumable) {
       // Subscriptions are credited by the webhook, not here.
       return res.json({ ok: true, ignored: 'not_consumable' })
+    }
+
+    // Verify the purchase against RevenueCat before crediting, so a tampered
+    // client can't claim Super Likes / Boosts it never bought. Returns:
+    //   true  → confirmed, credit it
+    //   false → key configured but RevenueCat doesn't show this purchase yet →
+    //           don't credit here; the (authenticated) webhook will grant it
+    //   null  → no secret key configured → fall back to crediting (webhook backs
+    //           it up), preserving behaviour before the key was added
+    const verified = await verifyConsumableWithRevenueCat(req.user.id, productId, transactionId)
+    if (verified === false) {
+      const entitlements = await getEffectiveEntitlements(req.user.id)
+      return res.json({ ok: true, pending: true, reason: 'awaiting_revenuecat', entitlements })
     }
 
     const result = await grantPurchase({
