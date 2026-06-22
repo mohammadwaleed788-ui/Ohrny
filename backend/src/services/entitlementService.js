@@ -11,6 +11,7 @@ import {
   userBoosts,
 } from '../../db/schema/subscriptions.js'
 import { userDiscoverPreferences } from '../../db/schema/settings.js'
+import { REVENUECAT_SECRET_KEY } from '../config/constants.js'
 import {
   notifyWeeklySuperLikes,
   notifyWeeklyBoost,
@@ -862,6 +863,140 @@ export async function syncUserPlanCache(userId, client = db) {
   const plan = activeSubscription?.planId || 'free'
   await client.update(users).set({ plan, updatedAt: new Date() }).where(eq(users.id, userId))
   return plan
+}
+
+function storeToPlatform(store) {
+  const raw = String(store || '').toLowerCase()
+  if (raw.includes('play') || raw.includes('android')) return 'android'
+  if (raw.includes('app_store') || raw.includes('ios')) return 'ios'
+  if (raw.includes('stripe') || raw.includes('web')) return 'web'
+  return 'ios'
+}
+
+// Verify a user's subscription DIRECTLY with RevenueCat's REST API and apply it
+// to the DB immediately — the synchronous counterpart to the async webhook. The
+// app calls this right after a subscription purchase so premium unlocks at once
+// instead of waiting for (or being blocked by a missed) webhook. RevenueCat is
+// the source of truth here: we only grant what its `subscribers` endpoint says
+// is currently active, so the client can't fake a plan. Idempotent — the webhook
+// later reconciles the authoritative transaction row over the one we write.
+export async function syncSubscriptionFromRevenueCat(userId) {
+  if (!REVENUECAT_SECRET_KEY) return { ok: false, reason: 'not_configured' }
+
+  // We identify RevenueCat as users.id and persist it as revenueCatUserId on the
+  // first webhook — either is a valid REST lookup key for the same subscriber.
+  const [u] = await db
+    .select({ id: users.id, revenueCatUserId: users.revenueCatUserId })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+  if (!u) return { ok: false, reason: 'user_not_found' }
+  const appUserId = u.revenueCatUserId || u.id
+
+  let subscriber
+  try {
+    const resp = await fetch(
+      `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`,
+      { headers: { Authorization: `Bearer ${REVENUECAT_SECRET_KEY}` } },
+    )
+    if (!resp.ok) return { ok: false, reason: `revenuecat_http_${resp.status}` }
+    const json = await resp.json()
+    subscriber = json?.subscriber
+  } catch (err) {
+    console.error('RevenueCat REST fetch failed:', err)
+    return { ok: false, reason: 'revenuecat_unreachable' }
+  }
+  if (!subscriber) return { ok: false, reason: 'no_subscriber' }
+
+  // Persist the mapping so the webhook can find this user by app_user_id later.
+  if (!u.revenueCatUserId && appUserId) {
+    await db
+      .update(users)
+      .set({ revenueCatUserId: appUserId, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+  }
+
+  await seedSubscriptionCatalog()
+
+  const nowMs = Date.now()
+  const entitlements = subscriber.entitlements || {}
+  const active = Object.entries(entitlements)
+    .map(([id, info]) => ({
+      id,
+      info,
+      exp: info?.expires_date ? Date.parse(info.expires_date) : null,
+    }))
+    .filter((e) => PLAN_ORDER.includes(e.id) && e.id !== 'free' && (e.exp === null || e.exp > nowMs))
+    .sort((a, b) => planRank(b.id) - planRank(a.id))[0]
+
+  // No active paid entitlement on RevenueCat → just reconcile the cached plan
+  // (expires anything stale to free); never grant.
+  if (!active) {
+    const plan = await syncUserPlanCache(userId)
+    return { ok: true, plan, granted: false }
+  }
+
+  const entitlementId = active.id
+  const productId = active.info.product_identifier || null
+  const detail = (subscriber.subscriptions || {})[productId] || {}
+  const product = await findSubscriptionProductByRevenueCatId(productId)
+  const planId = product?.planId || entitlementId
+  const now = new Date()
+  const startedAt = detail.purchase_date ? new Date(detail.purchase_date) : now
+  const expiresAt = active.exp ? new Date(active.exp) : null
+  const platform = storeToPlatform(detail.store)
+
+  await db.transaction(async (tx) => {
+    // Supersede any currently-active row (a plan change / re-sync).
+    await tx
+      .update(userSubscriptions)
+      .set({ status: 'expired', updatedAt: now })
+      .where(and(eq(userSubscriptions.userId, userId), eq(userSubscriptions.status, 'active')))
+
+    // Reuse the row for this product if we've seen it (avoids row bloat on
+    // repeated syncs); otherwise create one. The webhook later upserts by its
+    // real transaction id and supersedes this either way.
+    const [existing] = await tx
+      .select({ id: userSubscriptions.id })
+      .from(userSubscriptions)
+      .where(
+        and(
+          eq(userSubscriptions.userId, userId),
+          eq(userSubscriptions.revenueCatProductId, String(productId || '')),
+        ),
+      )
+      .orderBy(desc(userSubscriptions.startedAt))
+      .limit(1)
+
+    const row = {
+      userId,
+      planId,
+      productId: product?.id || null,
+      revenueCatProductId: productId,
+      duration: product?.duration || null,
+      revenueCatEntitlementId: entitlementId,
+      status: 'active',
+      platform,
+      priceAtPurchase: String(product?.totalPrice || '0'),
+      currency: product?.currency || 'EUR',
+      startedAt,
+      expiresAt,
+      cancelledAt: null,
+      gracePeriodEndsAt: null,
+      updatedAt: now,
+    }
+
+    if (existing) {
+      await tx.update(userSubscriptions).set(row).where(eq(userSubscriptions.id, existing.id))
+    } else {
+      await tx.insert(userSubscriptions).values(row)
+    }
+
+    await syncUserPlanCache(userId, tx)
+    await topUpSuperLikesForPlan(userId, tx)
+  })
+
+  return { ok: true, plan: planId, granted: true }
 }
 
 // Weekly Super Like allowance per plan (Plus = 5, Platin/Private = 10). Tops up

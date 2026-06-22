@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, ne } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { userDevices } from '../../../db/schema/userDevices.js'
 
@@ -56,6 +56,21 @@ export async function saveDevice(req, res) {
         },
       })
       .returning()
+
+    // A given FCM token belongs to exactly one device. If it was previously
+    // registered under a different deviceId (e.g. reinstall), drop it from those
+    // stale rows so we never push the same notification to one phone twice.
+    if (fcmToken) {
+      await db
+        .update(userDevices)
+        .set({ fcmToken: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(userDevices.fcmToken, String(fcmToken)),
+            ne(userDevices.deviceId, String(deviceId)),
+          ),
+        )
+    }
 
     return res.json({ message: 'Device saved successfully', device })
   } catch (error) {
@@ -243,9 +258,13 @@ export async function getUserFcmTokens(userId) {
       .from(userDevices)
       .where(and(eq(userDevices.userId, userId), eq(userDevices.pushNotificationEnabled, true)))
 
-    return devices
+    // De-duplicate: the same FCM token can sit on multiple device rows (e.g. a
+    // reinstall changes the deviceId but keeps/refreshes the same token), which
+    // would otherwise send the same push 2–4× to one phone.
+    const tokens = devices
       .map((device) => device.fcmToken)
       .filter((token) => token !== null && token !== '')
+    return [...new Set(tokens)]
   } catch (error) {
     console.error('Error getting user FCM tokens:', error)
     return []

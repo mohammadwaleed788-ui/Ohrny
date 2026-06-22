@@ -3,6 +3,7 @@ import {
   getEffectiveEntitlements,
   grantPurchase,
   normalizeConsumableProduct,
+  syncSubscriptionFromRevenueCat,
 } from '../../services/entitlementService.js'
 
 // Client-confirm fallback for one-time purchases (Boosts / Super Likes). The
@@ -43,6 +44,31 @@ export async function syncConsumablePurchase(req, res) {
   } catch (err) {
     console.error('syncConsumablePurchase error:', err)
     return res.status(500).json({ error: 'Failed to sync purchase' })
+  }
+}
+
+// Client-confirm for SUBSCRIPTIONS. The app calls this right after a successful
+// RevenueCat subscription purchase so premium unlocks immediately, instead of
+// waiting on the async webhook (which can lag or, rarely, drop). The backend
+// verifies the entitlement directly with RevenueCat's REST API — the client
+// can't fake a plan — then returns fresh entitlements. Safe to run alongside the
+// webhook: whichever lands first wins and the other reconciles.
+export async function syncSubscriptionPurchase(req, res) {
+  try {
+    const result = await syncSubscriptionFromRevenueCat(req.user.id)
+    const entitlements = await getEffectiveEntitlements(req.user.id)
+    // `not_configured` (no RC secret key) isn't a client error — the webhook is
+    // still the source of truth; just hand back current entitlements.
+    return res.json({
+      ok: result.ok,
+      synced: result.ok && result.granted === true,
+      reason: result.reason || null,
+      plan: result.plan || entitlements?.plan || 'free',
+      entitlements,
+    })
+  } catch (err) {
+    console.error('syncSubscriptionPurchase error:', err)
+    return res.status(500).json({ error: 'Failed to sync subscription' })
   }
 }
 
