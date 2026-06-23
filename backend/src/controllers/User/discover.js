@@ -689,24 +689,22 @@ export async function swipeDiscoverCard(req, res) {
   }
 }
 
-// Rewind (undo) the user's most recent swipe. Plus-and-above feature, unlimited
-// uses. Refunds the swipe count (and the Super Like, if it was one), removes the
-// swipe row so the profile re-enters the deck, and — if that swipe had just
-// formed a match — deactivates it (it's no longer mutual) and tells the other
-// user. The app restores the previous card locally.
+// Rewind (undo) the user's most recent PASS. Plus-and-above feature, unlimited
+// uses. Only passes are rewindable — a like/super_like can't be taken back (it
+// may have notified or matched the other person), so liked profiles never
+// re-enter the deck. Refunds the daily swipe count and removes the pass row so
+// the profile can surface again. The app restores the previous card locally.
 export async function rewindLastSwipe(req, res) {
   try {
     const userId = req.user.id
     const access = await assertFeature(userId, 'rewindLastSwipe')
     if (!access.ok) return res.status(access.status).json(access.body)
 
+    // The single most recent swipe — but only act on it if it was a PASS. We do
+    // NOT skip past a like to an older pass: that would rewind to a profile the
+    // user already moved beyond by liking someone else.
     const [last] = await db
-      .select({
-        id: likes.id,
-        toUserId: likes.toUserId,
-        type: likes.type,
-        matchId: likes.matchId,
-      })
+      .select({ id: likes.id, toUserId: likes.toUserId, type: likes.type })
       .from(likes)
       .where(
         and(
@@ -717,44 +715,22 @@ export async function rewindLastSwipe(req, res) {
       .orderBy(desc(likes.createdAt), desc(likes.id))
       .limit(1)
 
-    if (!last) return res.status(404).json({ error: 'no_swipe_to_rewind' })
+    if (!last || last.type !== 'pass') {
+      return res.status(404).json({ error: 'no_swipe_to_rewind' })
+    }
 
     await db.transaction(async (tx) => {
       await tx.delete(likes).where(eq(likes.id, last.id))
-
-      if (last.matchId) {
-        await tx
-          .update(matches)
-          .set({
-            isActive: false,
-            unmatchedAt: new Date(),
-            unmatchedByUserId: userId,
-            updatedAt: new Date(),
-          })
-          .where(eq(matches.id, last.matchId))
-      }
-
-      const updates = {
-        updatedAt: new Date(),
-        swipesUsedToday: sql`greatest(${users.swipesUsedToday} - 1, 0)`,
-      }
-      if (last.type === 'super_like') {
-        updates.superLikesLeft = sql`${users.superLikesLeft} + 1`
-      }
-      await tx.update(users).set(updates).where(eq(users.id, userId))
+      await tx
+        .update(users)
+        .set({
+          updatedAt: new Date(),
+          swipesUsedToday: sql`greatest(${users.swipesUsedToday} - 1, 0)`,
+        })
+        .where(eq(users.id, userId))
     })
 
-    // If we tore down a just-formed match, let the other device drop it.
-    if (last.matchId) {
-      emitToUser(last.toUserId, 'match:removed', { matchId: last.matchId })
-    }
-
-    return res.json({
-      ok: true,
-      toUserId: last.toUserId,
-      type: last.type,
-      unmatched: Boolean(last.matchId),
-    })
+    return res.json({ ok: true, toUserId: last.toUserId, type: last.type })
   } catch (err) {
     console.error('rewindLastSwipe error:', err)
     return res.status(500).json({ error: 'Failed to rewind' })
