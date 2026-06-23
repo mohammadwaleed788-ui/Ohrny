@@ -990,11 +990,13 @@ export async function wipeAccount(req, res) {
     let removedMatches = [] // [{ id, partnerId }] — for socket broadcast after commit
 
     await db.transaction(async (tx) => {
-      // Clear optional profile fields, keep account credentials intact
+      // Clear every optional profile field — keep account credentials (phone,
+      // handle, 2FA, age, iam) so they can rebuild from a blank profile.
       await tx
         .update(users)
         .set({
           bio: null,
+          aboutMe: null,
           pronouns: null,
           looking: null,
           work: null,
@@ -1025,6 +1027,58 @@ export async function wipeAccount(req, res) {
           updatedAt: new Date(),
         })
         .where(eq(userLifestyle.userId, userId))
+
+      // Reset privacy toggles to factory defaults (keep the single row).
+      await tx
+        .update(userPrivacySettings)
+        .set({
+          blurPhotos: true,
+          anonymousHandle: false,
+          ephemeralMessages: true,
+          screenshotShield: true,
+          incognitoMode: false,
+          hideAge: false,
+          hideDistance: false,
+          analyticsConsent: true,
+          personalizationConsent: true,
+          marketingEmails: false,
+          thirdPartyMeasurement: false,
+          updatedAt: new Date(),
+        })
+        .where(eq(userPrivacySettings.userId, userId))
+
+      // Reset dating-preference filters to factory defaults (keep the row).
+      await tx
+        .update(userDiscoverPreferences)
+        .set({
+          maxDistance: 25,
+          minDistance: 0,
+          ageMin: 18,
+          ageMax: 70,
+          relationshipType: 'dating',
+          photoBlurVisibility: 70,
+          verifiedOnly: false,
+          advancedCompatibility: false,
+          travelMode: false,
+          globalMode: false,
+          travelLat: null,
+          travelLng: null,
+          travelCity: null,
+          heightMin: 140,
+          heightMax: 220,
+          heightUnit: 'cm',
+          diet: [],
+          drinks: [],
+          smokes: [],
+          exercise: [],
+          kids: [],
+          pets: [],
+          education: [],
+          religion: [],
+          zodiac: [],
+          updatedAt: new Date(),
+        })
+        .where(eq(userDiscoverPreferences.userId, userId))
 
       // ── Wipe interactions: likes, matches, messages ──────────────────────
       // Hard-delete every like row the user is involved in (either side).
