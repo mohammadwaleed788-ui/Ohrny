@@ -10,7 +10,7 @@ import {
   inAppPurchases,
   userBoosts,
 } from '../../db/schema/subscriptions.js'
-import { userDiscoverPreferences } from '../../db/schema/settings.js'
+import { userDiscoverPreferences, userPrivacySettings } from '../../db/schema/settings.js'
 import { REVENUECAT_SECRET_KEY } from '../config/constants.js'
 import {
   notifyWeeklySuperLikes,
@@ -564,6 +564,34 @@ export async function getEffectiveEntitlements(userId, client = db) {
             sql`${userDiscoverPreferences.religion} <> '{}'::text[]`,
             sql`${userDiscoverPreferences.zodiac} <> '{}'::text[]`
           )
+        )
+      )
+
+    // Also turn OFF the Plus/Platin privacy toggles (Privacy & Safety screen).
+    // These only work on a paid plan, so when the sub lapses we switch them off
+    // in the DB too, so the toggles render off and stay consistent. The free
+    // privacy-first toggles (blur photos, anonymous handle) and consent flags
+    // are left untouched.
+    await client
+      .update(userPrivacySettings)
+      .set({
+        incognitoMode: false,
+        screenshotShield: false,
+        ephemeralMessages: false,
+        hideAge: false,
+        hideDistance: false,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(userPrivacySettings.userId, userId),
+          or(
+            eq(userPrivacySettings.incognitoMode, true),
+            eq(userPrivacySettings.screenshotShield, true),
+            eq(userPrivacySettings.ephemeralMessages, true),
+            eq(userPrivacySettings.hideAge, true),
+            eq(userPrivacySettings.hideDistance, true),
+          ),
         )
       )
   }
