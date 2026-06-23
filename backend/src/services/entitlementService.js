@@ -492,6 +492,7 @@ export async function getEffectiveEntitlements(userId, client = db) {
     .select({
       id: users.id,
       plan: users.plan,
+      iam: users.iam,
       swipesUsedToday: users.swipesUsedToday,
       swipesResetAt: users.swipesResetAt,
       superLikesLeft: users.superLikesLeft,
@@ -504,6 +505,8 @@ export async function getEffectiveEntitlements(userId, client = db) {
   if (!rawUser) return null
 
   const user = await resetDailySwipesIfNeeded(rawUser, client)
+  // Women message without any cap (per-chat or chat-count), regardless of plan.
+  const unlimitedMessaging = user.iam === 'woman'
   const activeSubscription = await loadActiveSubscription(userId, client)
   // The active subscription row is the source of truth. Do NOT fall back to the
   // cached users.plan column — a sub that expired by time (with no EXPIRATION
@@ -595,8 +598,12 @@ export async function getEffectiveEntitlements(userId, client = db) {
       : null,
     limits: {
       swipesPerDay: toNullableNumber(plan.swipesPerDay),
-      maxChats: toNullableNumber(plan.maxChats),
-      maxMessagesPerChat: toNullableNumber(plan.maxMessagesPerChat),
+      // Women always message without limit (no per-chat or chat-count cap),
+      // regardless of plan. Everyone else follows their plan's caps.
+      maxChats: unlimitedMessaging ? null : toNullableNumber(plan.maxChats),
+      maxMessagesPerChat: unlimitedMessaging
+        ? null
+        : toNullableNumber(plan.maxMessagesPerChat),
       superLikesPerWeek: Number(plan.superLikesPerWeek || 0),
     },
     usage: {

@@ -406,21 +406,29 @@ export function initSocket(server) {
         io.to(`match:${matchId}`).emit('message:new', outMsg)
         ack?.({ ok: true, message: outMsg })
 
-        // Tell the sender their message is delivered (double-grey tick) — gated
-        // by the sender's own readReceipts entitlement.
-        if (recipientOnline) {
-          const acc = await assertFeature(userId, 'readReceipts')
-          if (acc.ok) {
+        // If the recipient has THIS chat open, the message is read the instant it
+        // arrives — mark it read now and flip the sender's tick to green instead
+        // of waiting for the recipient's markRead round-trip. Otherwise it's just
+        // delivered (if online) and we push a notification.
+        const recipientReading = await isUserReadingMatch(recipientId, matchId)
+        const senderSeesReceipts = (await assertFeature(userId, 'readReceipts')).ok
+
+        if (recipientReading) {
+          await db
+            .update(messages)
+            .set({ isRead: true, readAt: now })
+            .where(eq(messages.id, msg.id))
+          if (senderSeesReceipts) {
+            io.to(`user:${userId}`).emit('message:read', { matchId, readBy: recipientId })
+          }
+        } else {
+          if (recipientOnline && senderSeesReceipts) {
             io.to(`user:${userId}`).emit('message:delivered', {
               matchId,
               deliveredTo: recipientId,
               messageId: msg.id,
             })
           }
-        }
-
-        // Push unless the recipient is actively reading this exact chat.
-        if (!(await isUserReadingMatch(recipientId, matchId))) {
           notifyNewMessage(recipientId, socket.userHandle, matchId)
         }
       } catch (err) {

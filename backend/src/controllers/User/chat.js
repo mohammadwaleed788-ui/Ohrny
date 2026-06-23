@@ -426,16 +426,29 @@ export async function sendMessage(req, res) {
       await attachUsersToMatchRoom([userId, recipientId], matchId, { emitMatchNew: false })
       io.to(`match:${matchId}`).emit('message:new', outMsg)
 
-      // Tell the sender it's delivered (double-grey tick) — Platin only.
-      if (recipientOnline && (await assertFeature(userId, 'readReceipts')).ok) {
-        io.to(`user:${userId}`).emit('message:delivered', {
-          matchId,
-          deliveredTo: recipientId,
-          messageId: msg.id,
-        })
-      }
+      // If the recipient has THIS chat open, the message is read the instant it
+      // arrives — mark it read now and flip the sender's tick to green, instead
+      // of waiting for the recipient's client to round-trip a markRead.
+      const recipientReading = await isUserReadingMatch(recipientId, matchId)
+      const senderSeesReceipts = (await assertFeature(userId, 'readReceipts')).ok
 
-      if (!(await isUserReadingMatch(recipientId, matchId))) {
+      if (recipientReading) {
+        await db
+          .update(messages)
+          .set({ isRead: true, readAt: now })
+          .where(eq(messages.id, msg.id))
+        if (senderSeesReceipts) {
+          io.to(`user:${userId}`).emit('message:read', { matchId, readBy: recipientId })
+        }
+      } else {
+        // Not in the chat → delivered tick (if online) + a push notification.
+        if (recipientOnline && senderSeesReceipts) {
+          io.to(`user:${userId}`).emit('message:delivered', {
+            matchId,
+            deliveredTo: recipientId,
+            messageId: msg.id,
+          })
+        }
         notifyNewMessage(recipientId, req.user.handle, matchId)
       }
     } else {
