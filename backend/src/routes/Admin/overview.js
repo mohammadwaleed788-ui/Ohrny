@@ -1,9 +1,9 @@
 import { Router } from 'express'
-import { requireAuth } from '../../middleware/admin/auth.js'
+import { requireAuth, requireTab } from '../../middleware/admin/auth.js'
 import { getOverview } from '../../controllers/Admin/overview.js'
 
 const router = Router()
 
-router.get('/overview', requireAuth, getOverview)
+router.get('/overview', requireAuth, requireTab('overview'), getOverview)
 
 export default router

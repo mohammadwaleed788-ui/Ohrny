@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
-import { Button } from './operatedStyles.jsx'
-import { op } from './operatedTheme'
+import { Button } from '../ui/operatedStyles.jsx'
+import { op } from '../theme/operatedTheme.js'
 
 const fieldClass = `rounded-md border ${op.borderSoft} ${op.bgMain} px-3 py-2 text-sm text-[oklch(0.96_0.005_260)] outline-none`
 
@@ -12,6 +12,8 @@ export function NewPersonaModal({ onClose, onCreate }) {
   const [orientation, setOrientation] = useState('everyone')
   const [intent, setIntent] = useState('serious')
   const [relStatus, setRelStatus] = useState('single')
+  const [pronouns, setPronouns] = useState('')
+  const [looking, setLooking] = useState('')
   const [city, setCity] = useState('')
   const [countryCode, setCountryCode] = useState('US')
   const [latApprox, setLatApprox] = useState('40.71')
@@ -23,12 +25,18 @@ export function NewPersonaModal({ onClose, onCreate }) {
   const [drinks, setDrinks] = useState('Socially')
   const [smokes, setSmokes] = useState('No')
   const [kids, setKids] = useState('Open')
+  const [pets, setPets] = useState('')
+  const [diet, setDiet] = useState('')
+  const [exercise, setExercise] = useState('')
+  const [religion, setReligion] = useState('')
+  const [zodiac, setZodiac] = useState('')
   const [interests, setInterests] = useState('coffee, music, books')
   const [maxDistance, setMaxDistance] = useState(25)
   const [ageMin, setAgeMin] = useState(18)
   const [ageMax, setAgeMax] = useState(70)
   const [promptOne, setPromptOne] = useState('Coffee, a long walk, and a conversation that accidentally lasts two hours.')
   const [promptTwo, setPromptTwo] = useState('Kindness, curiosity, and a real laugh.')
+  const [promptThree, setPromptThree] = useState('Tell me the small thing you are weirdly passionate about.')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
@@ -50,6 +58,8 @@ export function NewPersonaModal({ onClose, onCreate }) {
         orientation: [orientation],
         intent,
         relStatus,
+        pronouns,
+        looking,
         city,
         countryCode,
         latApprox,
@@ -61,6 +71,11 @@ export function NewPersonaModal({ onClose, onCreate }) {
         drinks,
         smokes,
         kids,
+        pets,
+        diet,
+        exercise,
+        religion,
+        zodiac,
         interests: cleanInterests,
         maxDistance,
         ageMin,
@@ -68,6 +83,7 @@ export function NewPersonaModal({ onClose, onCreate }) {
         prompts: [
           { position: 1, title: 'A PERFECT SUNDAY', answer: promptOne },
           { position: 2, title: 'NON-NEGOTIABLES', answer: promptTwo },
+          { position: 3, title: 'CONVERSATION STARTER', answer: promptThree },
         ],
         hue: Math.floor(Math.random() * 360),
       })
@@ -94,7 +110,11 @@ export function NewPersonaModal({ onClose, onCreate }) {
           <div className="grid grid-cols-3 gap-3">
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Gender<select className={`mt-1 w-full ${fieldClass}`} value={gender} onChange={(event) => setGender(event.target.value)}><option>Woman</option><option>Man</option><option>Non-binary</option></select></label>
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Interested in<select className={`mt-1 w-full ${fieldClass}`} value={orientation} onChange={(event) => setOrientation(event.target.value)}><option value="everyone">Everyone</option><option value="women">Women</option><option value="men">Men</option><option value="nonbinary">Non-binary</option></select></label>
-            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Intent<select className={`mt-1 w-full ${fieldClass}`} value={intent} onChange={(event) => setIntent(event.target.value)}><option value="serious">Long-term</option><option value="dating">Dating</option><option value="casual">Casual</option><option value="figuring_out">Figuring it out</option><option value="friends">Friends</option></select></label>
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Intent<select className={`mt-1 w-full ${fieldClass}`} value={intent} onChange={(event) => setIntent(event.target.value)}><option value="serious">Long-term</option><option value="dating">Dating</option><option value="casual">Casual</option><option value="figuring_out">Figuring it out</option><option value="friends">Friends</option><option value="non_monogamy">Non-monogamy</option></select></label>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Pronouns<input className={`mt-1 w-full ${fieldClass}`} value={pronouns} onChange={(event) => setPronouns(event.target.value)} /></label>
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Looking for<input className={`mt-1 w-full ${fieldClass}`} value={looking} onChange={(event) => setLooking(event.target.value)} /></label>
           </div>
           <div className="grid grid-cols-4 gap-3">
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>City<input className={`mt-1 w-full ${fieldClass}`} placeholder="Brooklyn, NY" value={city} onChange={(event) => setCity(event.target.value)} /></label>
@@ -109,10 +129,17 @@ export function NewPersonaModal({ onClose, onCreate }) {
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Education<input className={`mt-1 w-full ${fieldClass}`} value={edu} onChange={(event) => setEdu(event.target.value)} /></label>
           </div>
           <div className="grid grid-cols-4 gap-3">
-            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Status<select className={`mt-1 w-full ${fieldClass}`} value={relStatus} onChange={(event) => setRelStatus(event.target.value)}><option value="single">Single</option><option value="in_relationship">In relationship</option><option value="complicated">Complicated</option><option value="prefer_not_say">Private</option></select></label>
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Status<select className={`mt-1 w-full ${fieldClass}`} value={relStatus} onChange={(event) => setRelStatus(event.target.value)}><option value="single">Single</option><option value="in_relationship">In relationship</option><option value="married">Married</option><option value="non_monogamous">Non-monogamous</option><option value="complicated">Complicated</option><option value="prefer_not_say">Private</option></select></label>
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Drinks<select className={`mt-1 w-full ${fieldClass}`} value={drinks} onChange={(event) => setDrinks(event.target.value)}><option>Yes</option><option>Socially</option><option>Sometimes</option><option>Rarely</option><option>No</option></select></label>
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Smokes<select className={`mt-1 w-full ${fieldClass}`} value={smokes} onChange={(event) => setSmokes(event.target.value)}><option>No</option><option>Socially</option><option>Yes</option></select></label>
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Kids<select className={`mt-1 w-full ${fieldClass}`} value={kids} onChange={(event) => setKids(event.target.value)}><option>Open</option><option>Wants</option><option>Wants someday</option><option>Has kids</option><option>Doesn't want</option></select></label>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Pets<input className={`mt-1 w-full ${fieldClass}`} value={pets} onChange={(event) => setPets(event.target.value)} /></label>
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Diet<input className={`mt-1 w-full ${fieldClass}`} value={diet} onChange={(event) => setDiet(event.target.value)} /></label>
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Exercise<input className={`mt-1 w-full ${fieldClass}`} value={exercise} onChange={(event) => setExercise(event.target.value)} /></label>
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Religion<input className={`mt-1 w-full ${fieldClass}`} value={religion} onChange={(event) => setReligion(event.target.value)} /></label>
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Zodiac<input className={`mt-1 w-full ${fieldClass}`} value={zodiac} onChange={(event) => setZodiac(event.target.value)} /></label>
           </div>
           <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Interests<input className={`mt-1 w-full ${fieldClass}`} value={interests} onChange={(event) => setInterests(event.target.value)} /></label>
           <div className="grid grid-cols-3 gap-3">
@@ -120,9 +147,10 @@ export function NewPersonaModal({ onClose, onCreate }) {
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Age min<input className={`mt-1 w-full ${fieldClass}`} type="number" value={ageMin} onChange={(event) => setAgeMin(Number(event.target.value))} /></label>
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Age max<input className={`mt-1 w-full ${fieldClass}`} type="number" value={ageMax} onChange={(event) => setAgeMax(Number(event.target.value))} /></label>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Prompt 1<textarea className={`mt-1 min-h-20 w-full resize-none ${fieldClass}`} value={promptOne} onChange={(event) => setPromptOne(event.target.value)} /></label>
             <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Prompt 2<textarea className={`mt-1 min-h-20 w-full resize-none ${fieldClass}`} value={promptTwo} onChange={(event) => setPromptTwo(event.target.value)} /></label>
+            <label className={`block text-xs font-medium uppercase tracking-[0.08em] ${op.mute}`}>Prompt 3<textarea className={`mt-1 min-h-20 w-full resize-none ${fieldClass}`} value={promptThree} onChange={(event) => setPromptThree(event.target.value)} /></label>
           </div>
         </div>
         <div className={`flex justify-end gap-2 border-t ${op.borderSoft} p-4`}>

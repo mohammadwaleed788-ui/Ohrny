@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react'
-import { Button, StatusDot } from './operatedStyles.jsx'
-import { avatarGradient, op } from './operatedTheme'
+import { Button, StatusDot } from '../ui/operatedStyles.jsx'
+import { avatarGradient, op } from '../theme/operatedTheme.js'
 
 export function PersonaRail({ personas, selectedId, unreadByPersona, search, onSearchChange, onSelect, onNew }) {
   const filtered = personas.filter((persona) => {

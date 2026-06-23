@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth } from '../../middleware/admin/auth.js'
+import { requireAuth, requireTab } from '../../middleware/admin/auth.js'
 import {
   cancelUserSubscription,
   getUserDetail,
@@ -11,11 +11,13 @@ import {
 
 const router = Router()
 
-router.get('/users', requireAuth, getUsers)
-router.get('/users/:userId', requireAuth, getUserDetail)
-router.get('/users/:userId/subscription', requireAuth, getUserSubscription)
-router.post('/users/:userId/subscription/grant', requireAuth, grantUserSubscription)
-router.post('/users/:userId/subscription/cancel', requireAuth, cancelUserSubscription)
-router.post('/users/:userId/consumables/grant', requireAuth, grantUserConsumables)
+const usersTab = requireTab('users')
+
+router.get('/users', requireAuth, usersTab, getUsers)
+router.get('/users/:userId', requireAuth, usersTab, getUserDetail)
+router.get('/users/:userId/subscription', requireAuth, usersTab, getUserSubscription)
+router.post('/users/:userId/subscription/grant', requireAuth, usersTab, grantUserSubscription)
+router.post('/users/:userId/subscription/cancel', requireAuth, usersTab, cancelUserSubscription)
+router.post('/users/:userId/consumables/grant', requireAuth, usersTab, grantUserConsumables)
 
 export default router

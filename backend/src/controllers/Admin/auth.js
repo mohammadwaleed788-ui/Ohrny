@@ -10,11 +10,25 @@ import {
   verifyAdminRefreshToken,
   verifyTotpStepToken,
 } from '../../utils/jwt.js'
+import { resolveTabsForAdmin } from '../../config/adminPermissions.js'
 
 function clientIp(req) {
   const xff = req.headers['x-forwarded-for']
   if (typeof xff === 'string' && xff.length) return xff.split(',')[0].trim()
   return req.socket?.remoteAddress || ''
+}
+
+function serializeAdmin(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    teamRolePreset: row.teamRolePreset ?? null,
+    totpEnabled: row.totpEnabled,
+    tabs: resolveTabsForAdmin(row),
+    createdAt: row.createdAt,
+  }
 }
 
 export async function login(req, res) {
@@ -72,12 +86,7 @@ export async function login(req, res) {
     return res.json({
       accessToken,
       refreshToken,
-      admin: {
-        id: row.id,
-        email: row.email,
-        name: row.name,
-        role: row.role,
-      },
+      admin: serializeAdmin(row),
     })
   } catch (err) {
     console.error(err)
@@ -137,12 +146,7 @@ export async function verifyTotp(req, res) {
     return res.json({
       accessToken,
       refreshToken,
-      admin: {
-        id: row.id,
-        email: row.email,
-        name: row.name,
-        role: row.role,
-      },
+      admin: serializeAdmin(row),
     })
   } catch (err) {
     console.error(err)
@@ -183,12 +187,7 @@ export async function refresh(req, res) {
     return res.json({
       accessToken,
       refreshToken: nextRefreshToken,
-      admin: {
-        id: row.id,
-        email: row.email,
-        name: row.name,
-        role: row.role,
-      },
+      admin: serializeAdmin(row),
     })
   } catch (err) {
     console.error(err)
@@ -199,14 +198,7 @@ export async function refresh(req, res) {
 export async function me(req, res) {
   try {
     const [row] = await db
-      .select({
-        id: adminUsers.id,
-        email: adminUsers.email,
-        name: adminUsers.name,
-        role: adminUsers.role,
-        totpEnabled: adminUsers.totpEnabled,
-        createdAt: adminUsers.createdAt,
-      })
+      .select()
       .from(adminUsers)
       .where(eq(adminUsers.id, req.admin.id))
       .limit(1)
@@ -214,7 +206,7 @@ export async function me(req, res) {
     if (!row) {
       return res.status(404).json({ error: 'Not found' })
     }
-    return res.json({ admin: row })
+    return res.json({ admin: serializeAdmin(row) })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed' })

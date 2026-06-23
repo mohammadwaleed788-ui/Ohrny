@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Shield, X } from 'lucide-react'
-import { useAuth } from '../../contexts/AuthContext'
-import { Button, Chip, StatusDot } from './operatedStyles.jsx'
-import { op } from './operatedTheme'
-import { adminGet, adminPatch, adminPost } from './operatedApi'
-import { PersonaRail } from './PersonaRail'
-import { InboxView } from './InboxView'
-import { ProfileView } from './ProfileView'
-import { FeedView } from './FeedView'
-import { DashboardView } from './DashboardView'
-import { NewPersonaModal } from './NewPersonaModal'
-import { LikesView } from './LikesView'
+import { useAuth } from '../../contexts/AuthContext.jsx'
+import { Button, Chip, StatusDot } from './ui/operatedStyles.jsx'
+import { op } from './theme/operatedTheme.js'
+import { adminGet, adminPatch, adminPost } from './core/operatedApi.js'
+import { PersonaRail } from './components/PersonaRail.jsx'
+import { InboxView } from './components/InboxView.jsx'
+import { ProfileView } from './components/ProfileView.jsx'
+import { FeedView } from './components/FeedView.jsx'
+import { DashboardView } from './components/DashboardView.jsx'
+import { NewPersonaModal } from './components/NewPersonaModal.jsx'
+import { LikesView } from './components/LikesView.jsx'
 
 const tabs = [
   { id: 'inbox', label: 'Inbox' },
@@ -94,8 +94,14 @@ export default function OperatedProfilesApp() {
       age: nextPersona.age,
       gender: nextPersona.gender,
       orientation: nextPersona.orientation,
+      pronouns: nextPersona.pronouns,
+      looking: nextPersona.looking,
       city: nextPersona.city,
+      countryCode: nextPersona.country,
+      latApprox: nextPersona.latApprox,
+      lngApprox: nextPersona.lngApprox,
       bio: nextPersona.bio,
+      aboutMe: nextPersona.aboutMe,
       work: nextPersona.work,
       relStatus: nextPersona.relStatus,
       intent: nextPersona.intent,
@@ -103,8 +109,14 @@ export default function OperatedProfilesApp() {
       drinks: nextPersona.drinks,
       smokes: nextPersona.smokes,
       kids: nextPersona.kids,
+      pets: nextPersona.pets,
+      diet: nextPersona.diet,
+      exercise: nextPersona.exercise,
+      religion: nextPersona.religion,
+      zodiac: nextPersona.zodiac,
       edu: nextPersona.edu,
       interests: Array.isArray(nextPersona.interests) ? nextPersona.interests : [],
+      prompts: Array.isArray(nextPersona.prompts) ? nextPersona.prompts : [],
       photos: Array.isArray(nextPersona.photosList)
         ? nextPersona.photosList.filter((photo) => photo?.storageKey && String(photo.storageKey).trim())
         : undefined,
@@ -128,17 +140,25 @@ export default function OperatedProfilesApp() {
       orientation: draft.orientation,
       intent: draft.intent,
       relStatus: draft.relStatus,
+      pronouns: draft.pronouns,
+      looking: draft.looking,
       city: draft.city,
       countryCode: draft.countryCode,
       latApprox: draft.latApprox,
       lngApprox: draft.lngApprox,
       bio: draft.bio || 'New persona bio.',
+      aboutMe: draft.aboutMe,
       work: draft.work,
       height: draft.height,
       edu: draft.edu,
       drinks: draft.drinks,
       smokes: draft.smokes,
       kids: draft.kids,
+      pets: draft.pets,
+      diet: draft.diet,
+      exercise: draft.exercise,
+      religion: draft.religion,
+      zodiac: draft.zodiac,
       interests: draft.interests,
       photos: draft.photos,
       maxDistance: draft.maxDistance,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { adminGet } from './operatedApi'
-import { op } from './operatedTheme'
+import { adminGet } from '../core/operatedApi.js'
+import { op } from '../theme/operatedTheme.js'
 
 export function DashboardView({ persona }) {
   const [data, setData] = useState({ stats: persona.stats || {}, activity: [] })

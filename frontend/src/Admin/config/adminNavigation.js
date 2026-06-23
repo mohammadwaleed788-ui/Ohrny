@@ -2,34 +2,38 @@ export const adminNavGroups = [
   {
     group: 'Analytics',
     items: [
-      { id: 'overview', label: 'Overview' },
-      { id: 'matches', label: 'Matches' },
-      { id: 'revenue', label: 'Revenue' },
-      { id: 'experiments', label: 'Experiments' },
+      { id: 'overview', label: 'Overview', icon: 'dashboard' },
+      { id: 'matches', label: 'Matches', icon: 'heart' },
+      { id: 'revenue', label: 'Revenue', icon: 'dollar' },
+      { id: 'experiments', label: 'Experiments', icon: 'flask', badge: '4' },
     ],
   },
   {
     group: 'Operations',
     items: [
-      { id: 'users', label: 'Users' },
-      { id: 'trust', label: 'Trust & Safety' },
-      { id: 'moderation', label: 'Moderation' },
-      { id: 'support', label: 'Support' },
+      { id: 'users', label: 'Users', icon: 'users' },
+      { id: 'trust', label: 'Trust & Safety', icon: 'shield', hot: true },
+      { id: 'moderation', label: 'Content review', icon: 'flag', badge: '87' },
+      { id: 'support', label: 'Support', icon: 'tickets' },
     ],
   },
   {
     group: 'Product',
     items: [
-      { id: 'algorithm', label: 'Algorithm' },
-      { id: 'notifications', label: 'Notifications' },
-      { id: 'plans', label: 'Plans & Limits' },
+      { id: 'notifications', label: 'Notifications', icon: 'send', enabled: false },
+      { id: 'algorithm', label: 'Algorithm', icon: 'sliders', enabled: false },
+      { id: 'plans', label: 'Plans & limits', icon: 'dollar', enabled: false },
     ],
   },
   {
     group: 'Organization',
-    items: [{ id: 'team', label: 'Team' }],
+    items: [{ id: 'team', label: 'Team', icon: 'users' }],
   },
 ]
+
+export function isNavItemEnabled(item) {
+  return item?.enabled !== false
+}
 
 export const routeCrumbs = {
   overview: ['Overview'],

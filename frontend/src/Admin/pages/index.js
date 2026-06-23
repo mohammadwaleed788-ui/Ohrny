@@ -9,5 +9,5 @@ export { SupportPage } from './SupportPage'
 export { NotificationsPage } from './NotificationsPage'
 export { AlgorithmPage } from './AlgorithmPage'
 export { PlansPage } from './PlansPage'
-export { TeamPage } from './TeamPage'
+export { TeamPage } from './team/TeamPage'
 

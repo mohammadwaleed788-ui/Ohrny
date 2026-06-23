@@ -105,8 +105,13 @@ function mapPersona(row, extras = {}) {
     age: row.age,
     gender: row.iam === 'man' ? 'Man' : row.iam === 'nonbinary' ? 'Non-binary' : 'Woman',
     orientation: row.orientation || [],
+    pronouns: row.pronouns || '',
+    looking: row.looking || '',
+    aboutMe: row.aboutMe || '',
     city: row.city || '',
     country: row.countryCode || '',
+    latApprox: row.latApprox || '',
+    lngApprox: row.lngApprox || '',
     hue: Math.abs(String(row.id).split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)) % 360,
     status,
     bio: row.bio || row.aboutMe || '',
@@ -166,6 +171,11 @@ async function loadPersona(userId) {
     drinks: lifestyle?.drinks || '',
     smokes: lifestyle?.smokes || '',
     kids: lifestyle?.kids || '',
+    pets: lifestyle?.pets || '',
+    diet: lifestyle?.diet || '',
+    exercise: lifestyle?.exercise || '',
+    religion: lifestyle?.religion || '',
+    zodiac: lifestyle?.zodiac || '',
     edu: lifestyle?.education || '',
   })
 }
@@ -275,6 +285,9 @@ export async function createPersona(req, res) {
           age,
           iam,
           bio: body.bio ? String(body.bio).slice(0, 500) : null,
+          aboutMe: body.aboutMe ? String(body.aboutMe).slice(0, 500) : null,
+          pronouns: body.pronouns ? String(body.pronouns).slice(0, 40) : null,
+          looking: body.looking ? String(body.looking).slice(0, 120) : null,
           work: body.work ? String(body.work).slice(0, 120) : null,
           relationshipGoal,
           relStatus,
@@ -296,6 +309,11 @@ export async function createPersona(req, res) {
         drinks: body.drinks ? String(body.drinks).slice(0, 40) : null,
         smokes: body.smokes ? String(body.smokes).slice(0, 40) : null,
         kids: body.kids ? String(body.kids).slice(0, 60) : null,
+        pets: body.pets ? String(body.pets).slice(0, 60) : null,
+        diet: body.diet ? String(body.diet).slice(0, 60) : null,
+        exercise: body.exercise ? String(body.exercise).slice(0, 60) : null,
+        religion: body.religion ? String(body.religion).slice(0, 60) : null,
+        zodiac: body.zodiac ? String(body.zodiac).slice(0, 20) : null,
         education: body.edu ? String(body.edu).slice(0, 60) : null,
       })
 
@@ -378,12 +396,18 @@ export async function updatePersona(req, res) {
       userUpdates.handle = await uniqueHandle(nextBaseHandle, existing.id)
     }
     if (body.bio !== undefined) userUpdates.bio = body.bio ? String(body.bio).slice(0, 500) : null
+    if (body.aboutMe !== undefined) userUpdates.aboutMe = body.aboutMe ? String(body.aboutMe).slice(0, 500) : null
+    if (body.pronouns !== undefined) userUpdates.pronouns = body.pronouns ? String(body.pronouns).slice(0, 40) : null
+    if (body.looking !== undefined) userUpdates.looking = body.looking ? String(body.looking).slice(0, 120) : null
     if (body.work !== undefined) userUpdates.work = body.work ? String(body.work).slice(0, 120) : null
     if (body.gender !== undefined || body.iam !== undefined) userUpdates.iam = normalizeIam(body.gender || body.iam)
     if (body.orientation !== undefined) userUpdates.orientation = normalizeOrientation(body.orientation)
     if (body.relStatus !== undefined) userUpdates.relStatus = normalizeRelStatus(body.relStatus)
     if (body.intent !== undefined || body.relationshipGoal !== undefined) userUpdates.relationshipGoal = normalizeRelGoal(body.intent || body.relationshipGoal)
     if (body.city !== undefined) userUpdates.city = body.city ? String(body.city).slice(0, 100) : null
+    if (body.countryCode !== undefined) userUpdates.countryCode = body.countryCode ? String(body.countryCode).slice(0, 4) : null
+    if (body.latApprox !== undefined) userUpdates.latApprox = body.latApprox ? String(body.latApprox).slice(0, 12) : null
+    if (body.lngApprox !== undefined) userUpdates.lngApprox = body.lngApprox ? String(body.lngApprox).slice(0, 12) : null
     if (body.age !== undefined) userUpdates.age = clampInt(body.age, 18, 99, existing.age)
 
     await db.transaction(async (tx) => {
@@ -399,6 +423,11 @@ export async function updatePersona(req, res) {
           drinks: body.drinks ? String(body.drinks).slice(0, 40) : null,
           smokes: body.smokes ? String(body.smokes).slice(0, 40) : null,
           kids: body.kids ? String(body.kids).slice(0, 60) : null,
+          pets: body.pets ? String(body.pets).slice(0, 60) : null,
+          diet: body.diet ? String(body.diet).slice(0, 60) : null,
+          exercise: body.exercise ? String(body.exercise).slice(0, 60) : null,
+          religion: body.religion ? String(body.religion).slice(0, 60) : null,
+          zodiac: body.zodiac ? String(body.zodiac).slice(0, 20) : null,
           education: body.edu ? String(body.edu).slice(0, 60) : null,
         })
         .onConflictDoUpdate({
@@ -408,10 +437,38 @@ export async function updatePersona(req, res) {
             drinks: body.drinks ? String(body.drinks).slice(0, 40) : null,
             smokes: body.smokes ? String(body.smokes).slice(0, 40) : null,
             kids: body.kids ? String(body.kids).slice(0, 60) : null,
+            pets: body.pets ? String(body.pets).slice(0, 60) : null,
+            diet: body.diet ? String(body.diet).slice(0, 60) : null,
+            exercise: body.exercise ? String(body.exercise).slice(0, 60) : null,
+            religion: body.religion ? String(body.religion).slice(0, 60) : null,
+            zodiac: body.zodiac ? String(body.zodiac).slice(0, 20) : null,
             education: body.edu ? String(body.edu).slice(0, 60) : null,
             updatedAt: new Date(),
           },
         })
+
+      if (Array.isArray(body.prompts)) {
+        for (const prompt of body.prompts.slice(0, 3)) {
+          if (!prompt?.title || !prompt?.answer) continue
+          const position = clampInt(prompt.position, 1, 3, 1)
+          await tx
+            .insert(userPrompts)
+            .values({
+              userId,
+              position,
+              title: String(prompt.title).slice(0, 80),
+              answer: String(prompt.answer).slice(0, 160),
+            })
+            .onConflictDoUpdate({
+              target: [userPrompts.userId, userPrompts.position],
+              set: {
+                title: String(prompt.title).slice(0, 80),
+                answer: String(prompt.answer).slice(0, 160),
+                updatedAt: new Date(),
+              },
+            })
+        }
+      }
 
       if (Array.isArray(body.interests)) {
         await tx.delete(userInterests).where(eq(userInterests.userId, userId))

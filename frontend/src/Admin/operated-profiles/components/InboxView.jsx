@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ExternalLink, MoreHorizontal, Search, Send, X } from 'lucide-react'
-import { aiSuggestions } from './operatedData'
-import { userGet, userPatch, userPost } from './operatedApi'
-import { Button, Chip } from './operatedStyles.jsx'
-import { avatarGradient, op } from './operatedTheme'
+import { aiSuggestions } from '../core/operatedData.js'
+import { userGet, userPatch, userPost } from '../core/operatedApi.js'
+import { Button, Chip } from '../ui/operatedStyles.jsx'
+import { avatarGradient, op } from '../theme/operatedTheme.js'
 
 const suggestionText = {
   'Keep it playful': 'honestly that tracks',

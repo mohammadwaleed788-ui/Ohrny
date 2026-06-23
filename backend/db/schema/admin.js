@@ -1,5 +1,5 @@
 import {
-  pgTable, uuid, varchar, boolean, timestamp,
+  pgTable, uuid, varchar, boolean, timestamp, jsonb,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { adminRoleEnum } from './enums.js';
@@ -15,6 +15,8 @@ export const adminUsers = pgTable('admin_users', {
 
   name:           varchar('name', { length: 80 }).notNull(),
   role:           adminRoleEnum('role').notNull().default('support'),
+  teamRolePreset: varchar('team_role_preset', { length: 32 }),
+  tabPermissions: jsonb('tab_permissions').notNull().default([]),
 
   isActive:       boolean('is_active').notNull().default(true),
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Heart, RefreshCw, Star, X } from 'lucide-react'
-import { userGet, userPost } from './operatedApi'
-import { avatarGradient, op } from './operatedTheme'
-import { Button, Chip } from './operatedStyles.jsx'
+import { userGet, userPost } from '../core/operatedApi.js'
+import { avatarGradient, op } from '../theme/operatedTheme.js'
+import { Button, Chip } from '../ui/operatedStyles.jsx'
 
 export function LikesView({ persona, userToken, onMatched }) {
   const [items, setItems] = useState([])

@@ -5,6 +5,7 @@ import { adminTokens } from './theme/tokens'
 
 export function AdminLayout({
   children,
+  admin = null,
   route = 'overview',
   crumbs = ['Ohrny admin', 'Overview'],
   anon = true,
@@ -19,6 +20,7 @@ export function AdminLayout({
     <div className={`min-h-screen ${adminTokens.bg} ${adminTokens.text}`}>
       <div className={`grid min-h-screen ${collapsed ? 'grid-cols-[72px_1fr]' : 'grid-cols-[240px_1fr]'}`}>
         <AdminSidebar
+          admin={admin}
           route={route}
           onRouteChange={onRouteChange}
           collapsed={collapsed}

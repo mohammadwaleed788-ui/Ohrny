@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { AdminLayout } from './AdminLayout'
 import { routeCrumbs } from './config/adminNavigation'
+import { adminHasTab, firstAllowedTab } from './config/adminPermissions'
 import { apiGet } from '../services/apiClient'
 import {
   AlgorithmPage,
@@ -42,15 +43,31 @@ function FallbackPage({ route }) {
   )
 }
 
+function NoAccessPage() {
+  return (
+    <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4 text-sm text-neutral-300">
+      You do not have access to any admin sections. Contact your super admin.
+    </div>
+  )
+}
+
 export default function AdminApp() {
   const navigate = useNavigate()
-  const { logout } = useAuth()
+  const { admin, logout } = useAuth()
   const [route, setRoute] = useState('overview')
   const [anon, setAnon] = useState(true)
   const [badgeOverrides, setBadgeOverrides] = useState({})
 
   const crumbs = useMemo(() => ['Ohrny admin', ...(routeCrumbs[route] ?? [route])], [route])
   const ActivePage = PAGE_COMPONENTS[route]
+  const hasRouteAccess = adminHasTab(admin, route)
+
+  useEffect(() => {
+    if (!admin?.tabs?.length) return
+    if (!adminHasTab(admin, route)) {
+      setRoute(firstAllowedTab(admin))
+    }
+  }, [admin, route])
 
   const handleSignOut = async () => {
     await logout()
@@ -59,24 +76,38 @@ export default function AdminApp() {
 
   const refreshSidebarBadges = useCallback(async () => {
     try {
-      const [overviewResult, supportResult] = await Promise.all([
-        apiGet('/admin/overview?range=7d'),
-        apiGet('/admin/support/summary'),
-      ])
-      const openReportsRaw = String(overviewResult?.kpis?.openReports?.v || '').replace(/,/g, '')
-      const openReports = Number.parseInt(openReportsRaw, 10)
-      const openTickets = Number.parseInt(String(supportResult?.openTickets || '0'), 10)
-      setBadgeOverrides((current) => ({
-        ...current,
-        ...(Number.isFinite(openReports) ? { trust: String(openReports) } : {}),
-        ...(Number.isFinite(openTickets) ? { support: String(openTickets) } : {}),
-      }))
+      const requests = []
+      if (adminHasTab(admin, 'overview')) {
+        requests.push(apiGet('/admin/overview?range=7d').then((result) => ({ type: 'overview', result })))
+      }
+      if (adminHasTab(admin, 'support')) {
+        requests.push(apiGet('/admin/support/summary').then((result) => ({ type: 'support', result })))
+      }
+      if (!requests.length) return
+
+      const results = await Promise.all(requests)
+      setBadgeOverrides((current) => {
+        const next = { ...current }
+        for (const entry of results) {
+          if (entry.type === 'overview') {
+            const openReportsRaw = String(entry.result?.kpis?.openReports?.v || '').replace(/,/g, '')
+            const openReports = Number.parseInt(openReportsRaw, 10)
+            if (Number.isFinite(openReports)) next.trust = String(openReports)
+          }
+          if (entry.type === 'support') {
+            const openTickets = Number.parseInt(String(entry.result?.openTickets || '0'), 10)
+            if (Number.isFinite(openTickets)) next.support = String(openTickets)
+          }
+        }
+        return next
+      })
     } catch (err) {
       console.error('Sidebar badge refresh failed:', err)
     }
-  }, [])
+  }, [admin])
 
   useEffect(() => {
+    if (!admin) return undefined
     const startupId = setTimeout(() => {
       refreshSidebarBadges()
     }, 0)
@@ -85,10 +116,11 @@ export default function AdminApp() {
       clearTimeout(startupId)
       clearInterval(id)
     }
-  }, [refreshSidebarBadges])
+  }, [admin, refreshSidebarBadges])
 
   return (
     <AdminLayout
+      admin={admin}
       route={route}
       crumbs={crumbs}
       anon={anon}
@@ -97,7 +129,15 @@ export default function AdminApp() {
       onSignOut={handleSignOut}
       badgeOverrides={badgeOverrides}
     >
-      {ActivePage ? <ActivePage /> : <FallbackPage route={route} />}
+      {!admin?.tabs?.length ? (
+        <NoAccessPage />
+      ) : hasRouteAccess && ActivePage ? (
+        <ActivePage />
+      ) : hasRouteAccess ? (
+        <FallbackPage route={route} />
+      ) : (
+        <NoAccessPage />
+      )}
     </AdminLayout>
   )
 }

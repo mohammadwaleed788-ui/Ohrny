@@ -109,7 +109,14 @@ async function fetchWithAuth(path, options = {}, { retryOn401 = true } = {}) {
 export async function apiGet(path, options = {}) {
   const res = await fetchWithAuth(path, { method: 'GET', ...options })
   if (!res.ok) {
-    const err = new Error(`Request failed with status ${res.status}`)
+    let message = `Request failed with status ${res.status}`
+    try {
+      const data = await res.json()
+      if (data?.error) message = data.error
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(message)
     err.status = res.status
     throw err
   }
@@ -142,6 +149,26 @@ export async function apiPatch(path, body, options = {}) {
     ...options,
     method: 'PATCH',
     body: JSON.stringify(body ?? {}),
+  })
+  if (!res.ok) {
+    let message = `Request failed with status ${res.status}`
+    try {
+      const data = await res.json()
+      if (data?.error) message = data.error
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(message)
+    err.status = res.status
+    throw err
+  }
+  return res.json()
+}
+
+export async function apiDelete(path, options = {}) {
+  const res = await fetchWithAuth(path, {
+    ...options,
+    method: 'DELETE',
   })
   if (!res.ok) {
     let message = `Request failed with status ${res.status}`

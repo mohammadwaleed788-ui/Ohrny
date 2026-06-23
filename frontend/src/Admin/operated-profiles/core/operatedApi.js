@@ -1,4 +1,4 @@
-import { API_BASE_URL, apiGet, apiPatch, apiPost } from '../../services/apiClient'
+import { API_BASE_URL, apiGet, apiPatch, apiPost } from '../../../services/apiClient'
 
 async function request(path, options = {}, token) {
   const headers = new Headers(options.headers)

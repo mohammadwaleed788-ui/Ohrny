@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Filter, Heart, RotateCcw, Star, X } from 'lucide-react'
-import { userGet, userPost } from './operatedApi'
-import { Button, Chip } from './operatedStyles.jsx'
-import { avatarGradient, op } from './operatedTheme'
+import { userGet, userPost } from '../core/operatedApi.js'
+import { Button, Chip } from '../ui/operatedStyles.jsx'
+import { avatarGradient, op } from '../theme/operatedTheme.js'
 
 export function FeedView({ persona, userToken }) {
   const [stack, setStack] = useState([])

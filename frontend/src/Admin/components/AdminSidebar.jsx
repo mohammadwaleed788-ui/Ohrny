@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronDown,
@@ -17,39 +17,8 @@ import {
   Users,
 } from 'lucide-react'
 import { adminTokens } from '../theme/tokens'
-
-const NAV = [
-  {
-    group: 'Analytics',
-    items: [
-      { id: 'overview', label: 'Overview', icon: 'dashboard' },
-      { id: 'matches', label: 'Matches', icon: 'heart' },
-      { id: 'revenue', label: 'Revenue', icon: 'dollar' },
-      { id: 'experiments', label: 'Experiments', icon: 'flask', badge: '4' },
-    ],
-  },
-  {
-    group: 'Operations',
-    items: [
-      { id: 'users', label: 'Users', icon: 'users' },
-      { id: 'trust', label: 'Trust & Safety', icon: 'shield', hot: true },
-      { id: 'moderation', label: 'Content review', icon: 'flag', badge: '87' },
-      { id: 'support', label: 'Support', icon: 'tickets' },
-    ],
-  },
-  // {
-  //   group: 'Product',
-  //   items: [
-  //     { id: 'notifications', label: 'Notifications', icon: 'send' },
-  //     { id: 'algorithm', label: 'Algorithm', icon: 'sliders' },
-  //     { id: 'plans', label: 'Plans & limits', icon: 'dollar' },
-  //   ],
-  // },
-  // {
-  //   group: 'Organization',
-  //   items: [{ id: 'team', label: 'Team', icon: 'users' }],
-  // },
-]
+import { adminHasTab, formatRoleLabel } from '../config/adminPermissions'
+import { adminNavGroups, isNavItemEnabled } from '../config/adminNavigation'
 
 const ICONS = {
   dashboard: LayoutDashboard,
@@ -62,6 +31,16 @@ const ICONS = {
   tickets: Tickets,
   send: Send,
   sliders: SlidersHorizontal,
+}
+
+function initialsForName(name) {
+  return (name || 'A')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
 }
 
 function WorkspaceSwitcher({ collapsed }) {
@@ -154,18 +133,29 @@ function WorkspaceSwitcher({ collapsed }) {
 }
 
 export function AdminSidebar({
+  admin = null,
   route = 'overview',
   onRouteChange = () => {},
   collapsed = false,
   onToggleCollapse = () => {},
   badgeOverrides = {},
 }) {
+  const visibleNav = useMemo(
+    () => adminNavGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => isNavItemEnabled(item) && adminHasTab(admin, item.id)),
+      }))
+      .filter((group) => group.items.length > 0),
+    [admin],
+  )
+
   return (
     <aside className={`sticky top-0 flex h-screen flex-col border-r ${adminTokens.borderSoft} bg-[oklch(0.155_0.008_260)]`}>
       <WorkspaceSwitcher collapsed={collapsed} />
 
       <nav className={`flex-1 overflow-y-auto px-2 py-2 ${adminTokens.scrollbar}`}>
-        {NAV.map((group) => (
+        {visibleNav.map((group) => (
           <div key={group.group} className="mb-2">
             {!collapsed && <div className={`px-2 py-2 text-[10px] uppercase tracking-[0.14em] ${adminTokens.textMute}`}>{group.group}</div>}
             {group.items.map((item) => {
@@ -200,12 +190,12 @@ export function AdminSidebar({
 
       <div className={`flex items-center gap-2 border-t ${adminTokens.borderSoft} p-3`}>
         <div className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-orange-400 to-purple-500 text-xs font-semibold text-white">
-          EM
+          {initialsForName(admin?.name)}
         </div>
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <div className={`truncate text-xs font-semibold ${adminTokens.text}`}>Elena M.</div>
-            <div className={`truncate font-mono text-[11px] ${adminTokens.textMute}`}>founder - admin</div>
+            <div className={`truncate text-xs font-semibold ${adminTokens.text}`}>{admin?.name || 'Admin'}</div>
+            <div className={`truncate font-mono text-[11px] ${adminTokens.textMute}`}>{formatRoleLabel(admin)}</div>
           </div>
         )}
         <button

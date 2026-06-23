@@ -7,6 +7,7 @@ import adminUsersRoutes from './Admin/users.js'
 import adminOperatedRoutes from './Admin/operated.js'
 import adminTrustRoutes from './Admin/trust.js'
 import adminSupportRoutes from './Admin/support.js'
+import adminTeamRoutes from './Admin/team.js'
 import memberAuthRoutes from './User/auth.js'
 import memberS3Routes from './User/s3.js'
 import memberDeviceRoutes from './User/device.js'
@@ -32,6 +33,7 @@ router.use('/admin', adminMatchesRoutes)
 router.use('/admin', adminUsersRoutes)
 router.use('/admin', adminTrustRoutes)
 router.use('/admin', adminSupportRoutes)
+router.use('/admin', adminTeamRoutes)
 router.use('/admin/operated', adminOperatedRoutes)
 router.use('/user', memberAuthRoutes)
 router.use('/user', memberS3Routes)

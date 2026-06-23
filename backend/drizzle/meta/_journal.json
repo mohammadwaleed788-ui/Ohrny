@@ -134,6 +134,13 @@
       "when": 1781860000000,
       "tag": "0018_remove_operated_placeholder_photos",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781940000000,
+      "tag": "0019_admin_team_permissions",
+      "breakpoints": true
     }
   ]
 }

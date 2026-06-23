@@ -1,4 +1,4 @@
-import { op } from './operatedTheme'
+import { op } from '../theme/operatedTheme.js'
 
 export function StatusDot({ status }) {
   const color = status === 'active' ? 'bg-[oklch(0.78_0.14_155)]' : status === 'paused' ? 'bg-[oklch(0.82_0.14_80)]' : 'bg-[oklch(0.55_0.01_260)]'
