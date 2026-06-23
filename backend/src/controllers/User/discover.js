@@ -614,8 +614,6 @@ export async function swipeDiscoverCard(req, res) {
       return res.json({ ok: true, swipeType: type, matched: false })
     }
 
-    notifyNewLike(toUserId, fromUserId, type === 'super_like')
-
     const [reciprocal] = await db
       .select({ id: likes.id })
       .from(likes)
@@ -629,8 +627,10 @@ export async function swipeDiscoverCard(req, res) {
       .limit(1)
 
     if (!reciprocal) {
-      // No match yet → instant in-app nudge so the recipient's Likes badge
-      // updates live on any tab (push covers backgrounded/terminated).
+      // No match yet → tell the recipient about the like (push + live Likes-badge
+      // nudge on any tab). Only sent when this DOESN'T form a match, so a mutual
+      // like never produces both a "liked you" AND an "It's a Match!" push.
+      notifyNewLike(toUserId, fromUserId, type === 'super_like')
       emitToUser(toUserId, 'like:new', { fromUserId, superLike: type === 'super_like' })
       return res.json({ ok: true, swipeType: type, matched: false })
     }
