@@ -200,6 +200,16 @@ export async function getDiscoverCards(req, res) {
       // NOTE: incognito mode no longer hides a user from discovery — it only
       // suppresses their profile-view trace (see recordProfileView). So there is
       // deliberately no incognito filter here.
+      // Hide anyone who has already LIKED me: they belong in my "Likes" tab, not
+      // my swipe deck. This keeps the feed clean and means I can't double-handle
+      // them — liking them back from the Likes tab forms the match. It also keeps
+      // matched users out (the matched like rows still satisfy this).
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${likes} il
+        WHERE il.from_user_id = ${users.id}
+          AND il.to_user_id = ${req.user.id}
+          AND il.type IN ('like', 'super_like')
+      )`,
     ]
     if (verifiedOnly) {
       // "Verified" = a fully-complete profile (we OTP every signup, so there's
