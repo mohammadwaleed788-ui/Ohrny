@@ -9,6 +9,7 @@ import {
   userLifestyle,
 } from '../../../db/schema/users.js'
 import { phoneVerifications } from '../../../db/schema/safety.js'
+import { supportTickets } from '../../../db/schema/support.js'
 import { userPrivacySettings, userDiscoverPreferences } from '../../../db/schema/settings.js'
 import { userDevices } from '../../../db/schema/userDevices.js'
 import { likes, matches } from '../../../db/schema/matching.js'
@@ -966,7 +967,19 @@ export async function deleteAccount(req, res) {
 
     if (!account) return res.status(404).json({ error: 'Account not found' })
 
-    // Clean up phone verifications (not cascade-linked to users)
+    // Full erasure. Most user-linked tables are ON DELETE CASCADE, so deleting
+    // the users row removes them automatically: privacy & discover settings,
+    // travel locations, devices, likes, matches, profile views, messages, calls,
+    // blocks, reports, enforcements, appeals, subscriptions, in-app purchases,
+    // boosts, activity events, photos, prompts, interests and lifestyle.
+    // The two exceptions are cleaned up explicitly here:
+
+    // 1) Support tickets only SET NULL the requester on user delete (so the
+    //    ticket would survive). For a full account deletion we hard-delete the
+    //    user's tickets — their messages cascade from the ticket.
+    await db.delete(supportTickets).where(eq(supportTickets.requesterUserId, userId))
+
+    // 2) Phone verifications aren't linked to users.id (keyed by phone number).
     await db.delete(phoneVerifications).where(
       and(
         eq(phoneVerifications.phone, account.phone),
@@ -974,7 +987,7 @@ export async function deleteAccount(req, res) {
       ),
     )
 
-    // Delete user — cascade removes all related rows automatically
+    // Finally delete the user — cascade removes everything else.
     await db.delete(users).where(eq(users.id, userId))
 
     return res.json({ ok: true })
