@@ -101,7 +101,7 @@ export async function sendOtp(req, res) {
     const { phone, phoneCountry, flow } = req.body || {}
     const normalized = resolvePhone(phoneCountry, phone)
     if (!normalized) {
-      return res.status(400).json({ error: 'Invalid phone number' })
+      return res.status(400).json({ error: 'invalid_phone', message: 'Invalid phone number' })
     }
     const { phone: digits, phoneCountry: country, phoneE164 } = normalized
     const provider = resolveOtpProvider()
@@ -114,18 +114,18 @@ export async function sendOtp(req, res) {
 
     if (flow === 'login') {
       if (!existing) {
-        return res.status(404).json({ error: 'No account found with this number. New here? Create a profile.' })
+        return res.status(404).json({ error: 'no_account', message: 'No account found with this number. New here? Create a profile.' })
       }
       if (existing.isBanned) {
-        return res.status(403).json({ error: 'Account suspended' })
+        return res.status(403).json({ error: 'account_suspended', message: 'Account suspended' })
       }
       if (existing.deletedAt) {
-        return res.status(403).json({ error: 'Account not available' })
+        return res.status(403).json({ error: 'account_unavailable', message: 'Account not available' })
       }
     } else {
       // signup flow
       if (existing && !existing.deletedAt) {
-        return res.status(409).json({ error: 'An account already exists for this number. Please sign in instead.' })
+        return res.status(409).json({ error: 'phone_exists', message: 'An account already exists for this number. Please sign in instead.' })
       }
     }
 
@@ -219,7 +219,7 @@ export async function checkHandle(req, res) {
   try {
     const handle = String(req.query.handle || '').trim()
     if (!isValidHandle(handle)) {
-      return res.status(400).json({ error: 'Handle must be 2–24 characters: letters, numbers, _ or - only' })
+      return res.status(400).json({ error: 'handle_format', message: 'Handle must be 2–24 characters: letters, numbers, _ or - only' })
     }
     const [existing] = await db
       .select({ id: users.id })
@@ -227,7 +227,7 @@ export async function checkHandle(req, res) {
       .where(eq(users.handle, handle))
       .limit(1)
     if (existing) {
-      return res.status(409).json({ error: 'That name is already taken' })
+      return res.status(409).json({ error: 'handle_taken', message: 'That name is already taken' })
     }
     return res.json({ available: true })
   } catch {
@@ -240,12 +240,12 @@ export async function verifyOtp(req, res) {
     const { phone, phoneCountry, code } = req.body || {}
     const normalized = resolvePhone(phoneCountry, phone)
     if (!normalized) {
-      return res.status(400).json({ error: 'Invalid phone number' })
+      return res.status(400).json({ error: 'invalid_phone', message: 'Invalid phone number' })
     }
     const { phone: digits, phoneCountry: country, phoneE164 } = normalized
     const provider = resolveOtpProvider()
     if (!code || String(code).length !== 6) {
-      return res.status(400).json({ error: 'Invalid code' })
+      return res.status(400).json({ error: 'invalid_code', message: 'Invalid code' })
     }
 
     const attemptsWindowStart = new Date(Date.now() - 30 * 60 * 1000)
@@ -262,7 +262,7 @@ export async function verifyOtp(req, res) {
 
     const totalAttempts = recentAttempts.reduce((sum, row) => sum + row.attempts, 0)
     if (totalAttempts > 20) {
-      return res.status(429).json({ error: 'Too many attempts, try later' })
+      return res.status(429).json({ error: 'too_many_attempts', message: 'Too many attempts, try later' })
     }
 
     const [row] = await db
@@ -275,13 +275,13 @@ export async function verifyOtp(req, res) {
       .limit(1)
 
     if (!row || row.verified) {
-      return res.status(401).json({ error: 'No active verification' })
+      return res.status(401).json({ error: 'invalid_code', message: 'No active verification' })
     }
     if (row.expiresAt < new Date()) {
-      return res.status(401).json({ error: 'Code expired' })
+      return res.status(401).json({ error: 'code_expired', message: 'Code expired' })
     }
     if (row.attempts >= 5) {
-      return res.status(429).json({ error: 'Too many attempts' })
+      return res.status(429).json({ error: 'too_many_attempts', message: 'Too many attempts' })
     }
 
     if (isReviewPhone(phoneE164)) {
@@ -292,7 +292,7 @@ export async function verifyOtp(req, res) {
           .update(phoneVerifications)
           .set({ attempts: row.attempts + 1 })
           .where(eq(phoneVerifications.id, row.id))
-        return res.status(401).json({ error: 'Invalid code' })
+        return res.status(401).json({ error: 'invalid_code', message: 'Invalid code' })
       }
     } else if (provider === 'twilio') {
       try {
@@ -316,7 +316,7 @@ export async function verifyOtp(req, res) {
           .update(phoneVerifications)
           .set({ attempts: row.attempts + 1 })
           .where(eq(phoneVerifications.id, row.id))
-        return res.status(401).json({ error: 'Invalid code' })
+        return res.status(401).json({ error: 'invalid_code', message: 'Invalid code' })
       }
     }
 
@@ -333,10 +333,10 @@ export async function verifyOtp(req, res) {
 
     if (existing) {
       if (existing.isBanned) {
-        return res.status(403).json({ error: 'Account suspended' })
+        return res.status(403).json({ error: 'account_suspended', message: 'Account suspended' })
       }
       if (existing.deletedAt) {
-        return res.status(403).json({ error: 'Account not available' })
+        return res.status(403).json({ error: 'account_unavailable', message: 'Account not available' })
       }
 
       // Instagram-style: logging back in automatically resumes a paused account.
@@ -399,6 +399,7 @@ export async function completeOnboarding(req, res) {
       privacy,
       myBlur,
       photos,
+      language,
     } = req.body || {}
 
     if (!signupToken) {
@@ -438,7 +439,7 @@ export async function completeOnboarding(req, res) {
     try {
       payload = verifyUserSignupToken(signupToken)
     } catch {
-      return res.status(401).json({ error: 'Invalid or expired signup token' })
+      return res.status(401).json({ error: 'invalid_signup_token', message: 'Invalid or expired signup token' })
     }
 
     const [verification] = await db
@@ -447,13 +448,13 @@ export async function completeOnboarding(req, res) {
       .where(eq(phoneVerifications.id, payload.verificationId))
       .limit(1)
     if (!verification || !verification.verified) {
-      return res.status(401).json({ error: 'Phone verification required' })
+      return res.status(401).json({ error: 'unauthorized', message: 'Phone verification required' })
     }
     if (
       verification.phone !== payload.phone ||
       verification.phoneCountry !== payload.phoneCountry
     ) {
-      return res.status(401).json({ error: 'Signup token mismatch' })
+      return res.status(401).json({ error: 'unauthorized', message: 'Signup token mismatch' })
     }
 
     const [existingByPhone] = await db
@@ -462,7 +463,7 @@ export async function completeOnboarding(req, res) {
       .where(and(eq(users.phone, payload.phone), eq(users.phoneCountry, payload.phoneCountry)))
       .limit(1)
     if (existingByPhone) {
-      return res.status(409).json({ error: 'Account already exists for this phone' })
+      return res.status(409).json({ error: 'phone_exists', message: 'Account already exists for this phone' })
     }
 
     const [existingByHandle] = await db
@@ -471,7 +472,7 @@ export async function completeOnboarding(req, res) {
       .where(eq(users.handle, String(handle).trim()))
       .limit(1)
     if (existingByHandle) {
-      return res.status(409).json({ error: 'Handle is already taken' })
+      return res.status(409).json({ error: 'handle_taken', message: 'Handle is already taken' })
     }
 
     const normalizedPhotos = photos
@@ -512,6 +513,7 @@ export async function completeOnboarding(req, res) {
           myBlur: Number.isInteger(Number(myBlur)) ? Number(myBlur) : 70,
           twoFaMethod: mapTwoFaMethod(twoFaMethod),
           profileCompletePct: 100,
+          language: language ? String(language).trim().slice(0, 10) : 'en',
         })
         .returning({ id: users.id })
 
@@ -629,6 +631,7 @@ export async function updateProfile(req, res) {
       lat,
       lng,
       city,
+      language,
     } = req.body || {}
 
     const userUpdates = {}
@@ -660,6 +663,9 @@ export async function updateProfile(req, res) {
     }
     if (city !== undefined) {
       userUpdates.city = city ? String(city).trim().slice(0, 100) : null
+    }
+    if (language !== undefined) {
+      userUpdates.language = language ? String(language).trim().slice(0, 10) : 'en'
     }
 
     await db.transaction(async (tx) => {

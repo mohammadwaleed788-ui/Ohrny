@@ -148,6 +148,13 @@
       "when": 1782738748200,
       "tag": "0020_flowery_penance",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1782740587282,
+      "tag": "0021_low_impossible_man",
+      "breakpoints": true
     }
   ]
 }

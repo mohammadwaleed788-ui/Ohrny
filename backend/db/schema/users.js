@@ -80,6 +80,8 @@ export const users = pgTable('users', {
   pausedUntil:          timestamp('paused_until', { withTimezone: true }),
   deletedAt:            timestamp('deleted_at', { withTimezone: true }),  // soft delete
 
+  language:             varchar('language', { length: 10 }).notNull().default('en'),
+
   createdAt:            timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:            timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
