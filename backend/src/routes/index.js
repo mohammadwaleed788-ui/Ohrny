@@ -3,6 +3,7 @@ import healthRoute from './health.route.js'
 import staffAuthRoutes from './Admin/auth.js'
 import adminOverviewRoutes from './Admin/overview.js'
 import adminMatchesRoutes from './Admin/matches.js'
+import adminRevenueRoutes from './Admin/revenue.js'
 import adminUsersRoutes from './Admin/users.js'
 import adminOperatedRoutes from './Admin/operated.js'
 import adminTrustRoutes from './Admin/trust.js'
@@ -30,6 +31,7 @@ router.use(revenueCatRoutes)
 router.use('/admin', staffAuthRoutes)
 router.use('/admin', adminOverviewRoutes)
 router.use('/admin', adminMatchesRoutes)
+router.use('/admin', adminRevenueRoutes)
 router.use('/admin', adminUsersRoutes)
 router.use('/admin', adminTrustRoutes)
 router.use('/admin', adminSupportRoutes)

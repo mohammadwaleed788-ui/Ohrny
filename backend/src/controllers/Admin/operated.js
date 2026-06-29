@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNull, like, or, sql } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { likes, matches } from '../../../db/schema/matching.js'
 import { messages } from '../../../db/schema/messaging.js'
+import { userSubscriptions } from '../../../db/schema/subscriptions.js'
 import { userDiscoverPreferences, userPrivacySettings } from '../../../db/schema/settings.js'
 import { userInterests, userLifestyle, userPhotos, userPrompts, users } from '../../../db/schema/users.js'
 import { signAccessTokenUser } from '../../utils/jwt.js'
@@ -263,6 +264,7 @@ export async function createPersona(req, res) {
     const relationshipGoal = normalizeRelGoal(body.intent || body.relationshipGoal)
     const relStatus = normalizeRelStatus(body.relStatus)
     const orientation = normalizeOrientation(body.orientation)
+    const resolvedPlan = body.plan && ['free', 'plus', 'platin', 'private'].includes(body.plan) ? body.plan : 'platin'
     const interests = Array.isArray(body.interests) ? body.interests : []
     const photos = Array.isArray(body.photos) ? body.photos : []
     const prompts = Array.isArray(body.prompts) && body.prompts.length
@@ -298,7 +300,7 @@ export async function createPersona(req, res) {
           lngApprox: body.lngApprox ? String(body.lngApprox).slice(0, 12) : '-74.01',
           locationGranted: true,
           profileCompletePct: 100,
-          plan: body.plan && ['free', 'plus', 'platin', 'private'].includes(body.plan) ? body.plan : 'platin',
+          plan: resolvedPlan,
           idVerified: body.verified !== false,
         })
         .returning()
@@ -326,6 +328,19 @@ export async function createPersona(req, res) {
         ageMax: clampInt(body.ageMax, 18, 99, 70),
         relationshipType: relationshipGoal,
         globalMode: Boolean(body.globalMode),
+      })
+
+      // Operated personas should behave like paid test accounts by default.
+      await tx.insert(userSubscriptions).values({
+        userId: inserted.id,
+        planId: resolvedPlan,
+        duration: null,
+        status: 'active',
+        platform: 'web',
+        priceAtPurchase: '0',
+        currency: 'EUR',
+        startedAt: new Date(),
+        expiresAt: null,
       })
 
       const persistablePhotos = photos.slice(0, 6).filter(isPersistablePhoto)
@@ -520,6 +535,24 @@ export async function updatePersonaStatus(req, res) {
   } catch (err) {
     console.error('operated updatePersonaStatus error:', err)
     return res.status(500).json({ error: 'Failed to update operated persona status' })
+  }
+}
+
+export async function deletePersona(req, res) {
+  try {
+    const existing = await getOperatedBase(req.params.userId)
+    if (!existing) return res.status(404).json({ error: 'Operated persona not found' })
+    await db
+      .update(users)
+      .set({
+        deletedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, existing.id))
+    return res.json({ ok: true })
+  } catch (err) {
+    console.error('operated deletePersona error:', err)
+    return res.status(500).json({ error: 'Failed to delete operated persona' })
   }
 }
 

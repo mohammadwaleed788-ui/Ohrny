@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import { users } from '../../../db/schema/users.js'
-import { userSubscriptions } from '../../../db/schema/subscriptions.js'
+import { billingEvents, userSubscriptions } from '../../../db/schema/subscriptions.js'
 import { REVENUECAT_WEBHOOK_SECRET } from '../../config/constants.js'
 import {
   PLAN_ORDER,
@@ -36,6 +36,82 @@ function normalizeStatus(eventType) {
 function dateFromMs(value) {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? new Date(n) : null
+}
+
+function toUpper(value) {
+  return String(value || '').toUpperCase()
+}
+
+function normalizeConsumableType(productId) {
+  const raw = String(productId || '').toLowerCase()
+  if (!raw) return null
+  if (raw.includes('super')) return 'super_likes'
+  if (raw.includes('boost')) return 'boosts'
+  if (raw.includes('read') && raw.includes('receipt')) return 'read_receipts'
+  if (raw.includes('rewind')) return 'rewind'
+  if (raw.includes('incognito')) return 'incognito'
+  return null
+}
+
+function mapBillingEventType(event) {
+  const type = toUpper(event.type || event.event_type)
+  const periodType = toUpper(event.period_type || event.periodType)
+  const prevPeriodType = toUpper(event.original_period_type || event.originalPeriodType)
+
+  if (type === 'REFUND') return { eventType: 'refund', metricKind: 'refund' }
+  if (type === 'CANCELLATION') return { eventType: 'subscription_cancelled', metricKind: 'subscription' }
+  if (type === 'EXPIRATION') return { eventType: 'subscription_expired', metricKind: 'subscription' }
+  if (type === 'RENEWAL' && (prevPeriodType === 'TRIAL' || event.is_trial_conversion === true)) {
+    return { eventType: 'trial_converted', metricKind: 'trial' }
+  }
+  if (type === 'INITIAL_PURCHASE' && periodType === 'TRIAL') {
+    return { eventType: 'trial_started', metricKind: 'trial' }
+  }
+  if (type === 'RENEWAL') return { eventType: 'subscription_renewed', metricKind: 'subscription' }
+  if (type === 'INITIAL_PURCHASE' || type === 'PRODUCT_CHANGE') {
+    return { eventType: 'subscription_started', metricKind: 'subscription' }
+  }
+  return null
+}
+
+async function logBillingEvent({
+  userId,
+  mappedType,
+  amount,
+  currency,
+  occurredAt,
+  productId,
+  transactionId,
+  planId = null,
+  consumableType = null,
+  payload = null,
+  eventTypeRaw = null,
+}) {
+  if (!mappedType) return
+
+  try {
+    await db.insert(billingEvents).values({
+      userId,
+      eventType: mappedType.eventType,
+      metricKind: mappedType.metricKind,
+      consumableType,
+      planId,
+      amount: String(amount || 0),
+      currency: currency || 'EUR',
+      occurredAt: occurredAt || new Date(),
+      source: 'revenuecat',
+      revenueCatEventType: eventTypeRaw,
+      revenueCatProductId: productId || null,
+      revenueCatTransactionId: transactionId || null,
+      payload,
+    })
+  } catch (err) {
+    const message = String(err?.message || '')
+    if (message.includes('billing_events') || message.includes('does not exist')) {
+      return
+    }
+    throw err
+  }
 }
 
 async function findUser(appUserId) {
@@ -108,6 +184,18 @@ export async function handleRevenueCatWebhook(req, res) {
         revenueCatTransactionId: transactionId,
         platform,
         purchasedAt,
+      })
+      await logBillingEvent({
+        userId: user.id,
+        mappedType: { eventType: 'consumable_purchase', metricKind: 'consumable' },
+        amount: Number(price || 0),
+        currency,
+        occurredAt: purchasedAt,
+        productId,
+        transactionId,
+        consumableType: consumable.type,
+        payload: req.body,
+        eventTypeRaw: event.type || event.event_type || null,
       })
       return res.json({ ok: true, type: 'purchase', duplicate: Boolean(result.duplicate) })
     }
@@ -182,6 +270,23 @@ export async function handleRevenueCatWebhook(req, res) {
       if (status === 'active' || status === 'grace_period') {
         await topUpSuperLikesForPlan(user.id, tx)
       }
+    })
+
+    const mappedType = mapBillingEventType(event)
+    const fallbackConsumableType = normalizeConsumableType(productId)
+    const refundAmount = mappedType?.eventType === 'refund' ? -Math.abs(Number(price || 0)) : Number(price || 0)
+    await logBillingEvent({
+      userId: user.id,
+      mappedType,
+      amount: refundAmount,
+      currency,
+      occurredAt: startedAt,
+      productId,
+      transactionId,
+      planId,
+      consumableType: fallbackConsumableType,
+      payload: req.body,
+      eventTypeRaw: event.type || event.event_type || null,
     })
 
     return res.json({ ok: true, type: 'subscription', plan: planId, status })

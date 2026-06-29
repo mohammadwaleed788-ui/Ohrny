@@ -3,7 +3,7 @@ import { Shield, X } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext.jsx'
 import { Button, Chip, StatusDot } from './ui/operatedStyles.jsx'
 import { op } from './theme/operatedTheme.js'
-import { adminGet, adminPatch, adminPost } from './core/operatedApi.js'
+import { adminDelete, adminGet, adminPatch, adminPost } from './core/operatedApi.js'
 import { PersonaRail } from './components/PersonaRail.jsx'
 import { InboxView } from './components/InboxView.jsx'
 import { ProfileView } from './components/ProfileView.jsx'
@@ -30,6 +30,7 @@ export default function OperatedProfilesApp() {
   const [newOpen, setNewOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [deletingPersona, setDeletingPersona] = useState(false)
 
   const persona = personas.find((item) => item.id === selectedId) ?? personas[0] ?? null
   const unreadByPersona = useMemo(() => {
@@ -172,6 +173,29 @@ export default function OperatedProfilesApp() {
     setNewOpen(false)
   }
 
+  const removePersona = async () => {
+    if (!persona || deletingPersona) return
+    const confirmed = window.confirm(`Delete persona "${persona.name}"? This will remove the operated test profile.`)
+    if (!confirmed) return
+
+    setDeletingPersona(true)
+    setError('')
+    try {
+      const personaId = persona.id
+      await adminDelete(`/admin/operated/personas/${personaId}`)
+      setPersonas((value) => {
+        const remaining = value.filter((item) => item.id !== personaId)
+        setSelectedId(remaining[0]?.id || '')
+        return remaining
+      })
+      setOperatedToken('')
+    } catch (err) {
+      setError(err.message || 'Failed to delete operated persona')
+    } finally {
+      setDeletingPersona(false)
+    }
+  }
+
   return (
     <div className={`grid h-screen grid-rows-[57px_1fr] overflow-hidden ${op.bgMain} ${op.text}`}>
       <header className="flex items-center gap-4 border-b border-[oklch(0.26_0.01_260)] bg-[linear-gradient(90deg,oklch(0.70_0.17_25_/_0.18),oklch(0.17_0.008_260))] px-4">
@@ -226,6 +250,11 @@ export default function OperatedProfilesApp() {
               {persona.status === 'active' ? 'Pause persona' : 'Activate persona'}
             </Button>
             }
+            {persona && (
+              <Button tone="danger" disabled={deletingPersona} onClick={removePersona}>
+                {deletingPersona ? 'Deleting...' : 'Delete Persona'}
+              </Button>
+            )}
           </div>
 
           <div className="min-h-0 overflow-hidden">

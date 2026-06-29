@@ -6,6 +6,7 @@ import { relations } from 'drizzle-orm';
 import { users } from './users.js';
 import {
   planEnum, subscriptionStatusEnum, platformEnum, purchaseTypeEnum, subscriptionDurationEnum,
+  billingEventTypeEnum,
 } from './enums.js';
 
 // ─── subscription_plans ───────────────────────────────────────────────────────
@@ -149,6 +150,32 @@ export const userBoosts = pgTable('user_boosts', {
   activeIdx:    index('user_boosts_active_idx').on(t.isActive, t.expiresAt),
 }));
 
+// ─── billing_events ───────────────────────────────────────────────────────────
+// Immutable ledger rows used for analytics metrics (refunds, trial conversion,
+// extra consumables) that are not represented by entitlement balances.
+export const billingEvents = pgTable('billing_events', {
+  id:                      uuid('id').primaryKey().defaultRandom(),
+  userId:                  uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  eventType:               billingEventTypeEnum('event_type').notNull(),
+  metricKind:              varchar('metric_kind', { length: 24 }).notNull(),
+  consumableType:          purchaseTypeEnum('consumable_type'),
+  planId:                  varchar('plan_id', { length: 20 }).references(() => subscriptionPlans.id, { onDelete: 'set null' }),
+  amount:                  numeric('amount', { precision: 10, scale: 2 }).notNull().default('0'),
+  currency:                varchar('currency', { length: 4 }).notNull().default('EUR'),
+  occurredAt:              timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  source:                  varchar('source', { length: 30 }).notNull().default('revenuecat'),
+  revenueCatEventType:     varchar('revenue_cat_event_type', { length: 50 }),
+  revenueCatProductId:     varchar('revenue_cat_product_id', { length: 120 }),
+  revenueCatTransactionId: varchar('revenue_cat_transaction_id', { length: 120 }),
+  payload:                 jsonb('payload'),
+  createdAt:               timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  occurredIdx: index('billing_events_occurred_idx').on(t.occurredAt),
+  typeIdx: index('billing_events_type_idx').on(t.eventType, t.metricKind),
+  userIdx: index('billing_events_user_idx').on(t.userId),
+  rcTransactionIdx: index('billing_events_rc_tx_idx').on(t.revenueCatTransactionId),
+}));
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 export const subscriptionPlansRelations = relations(subscriptionPlans, ({ many }) => ({
   userSubscriptions: many(userSubscriptions),
@@ -172,4 +199,9 @@ export const inAppPurchasesRelations = relations(inAppPurchases, ({ one }) => ({
 
 export const userBoostsRelations = relations(userBoosts, ({ one }) => ({
   user: one(users, { fields: [userBoosts.userId], references: [users.id] }),
+}));
+
+export const billingEventsRelations = relations(billingEvents, ({ one }) => ({
+  user: one(users, { fields: [billingEvents.userId], references: [users.id] }),
+  plan: one(subscriptionPlans, { fields: [billingEvents.planId], references: [subscriptionPlans.id] }),
 }));

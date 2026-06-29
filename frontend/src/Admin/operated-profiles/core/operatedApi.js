@@ -1,4 +1,4 @@
-import { API_BASE_URL, apiGet, apiPatch, apiPost } from '../../../services/apiClient'
+import { API_BASE_URL, apiDelete, apiGet, apiPatch, apiPost } from '../../../services/apiClient'
 
 async function request(path, options = {}, token) {
   const headers = new Headers(options.headers)
@@ -31,6 +31,10 @@ export function adminPost(path, body) {
 
 export function adminPatch(path, body) {
   return apiPatch(path, body)
+}
+
+export function adminDelete(path) {
+  return apiDelete(path)
 }
 
 export function userGet(path, token) {

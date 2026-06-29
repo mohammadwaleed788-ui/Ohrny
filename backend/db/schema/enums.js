@@ -63,7 +63,18 @@ export const subscriptionDurationEnum = pgEnum('subscription_duration', [
 ]);
 
 export const purchaseTypeEnum = pgEnum('purchase_type', [
-  'super_likes', 'boosts',
+  'super_likes', 'boosts', 'read_receipts', 'rewind', 'incognito',
+]);
+
+export const billingEventTypeEnum = pgEnum('billing_event_type', [
+  'subscription_started',
+  'subscription_renewed',
+  'subscription_cancelled',
+  'subscription_expired',
+  'trial_started',
+  'trial_converted',
+  'consumable_purchase',
+  'refund',
 ]);
 
 // ─── Safety ──────────────────────────────────────────────────────────────────
