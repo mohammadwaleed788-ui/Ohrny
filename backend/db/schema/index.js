@@ -15,3 +15,4 @@ export * from './support.js';
 export * from './admin.js';
 export * from './userDevices.js';
 export * from './activity.js';
+export * from './notificationCampaigns.js';

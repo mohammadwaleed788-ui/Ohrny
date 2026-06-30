@@ -62,6 +62,7 @@ const TAB_API_MAP = {
   users: ['/admin/users'],
   trust: ['/admin/trust'],
   support: ['/admin/support'],
+  notifications: ['/admin/notifications'],
 }
 
 export function isSuperAdmin(admin) {

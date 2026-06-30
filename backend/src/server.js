@@ -7,6 +7,7 @@ import { globalLimiter } from './middleware/security/rateLimit.js'
 import { initSocket } from './socket/index.js'
 import { startEphemeralCleanup } from './jobs/ephemeralCleanup.js'
 import { startSubscriptionJobs } from './jobs/subscriptionJobs.js'
+import { startNotificationCampaignJobs } from './jobs/notificationCampaignJobs.js'
 
 const app = express()
 const server = createServer(app)
@@ -19,6 +20,7 @@ app.use('/api', routes)
 initSocket(server)
 startEphemeralCleanup()
 startSubscriptionJobs()
+startNotificationCampaignJobs()
 
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`)

@@ -1,6 +1,7 @@
 import { Server } from 'socket.io'
 import { and, eq, isNull, or } from 'drizzle-orm'
 import { socketAuthMiddleware } from './auth.js'
+import { adminSocketAuthMiddleware } from './adminAuth.js'
 import { db } from '../../db/index.js'
 import { matches } from '../../db/schema/matching.js'
 import { calls, messages } from '../../db/schema/messaging.js'
@@ -10,9 +11,15 @@ import { notifyNewMessage, notifyPhotoUnlockRequest } from '../services/notifica
 import { assertCanMessage, assertFeature, getEffectiveEntitlements } from '../services/entitlementService.js'
 
 let io = null
+let adminNamespace = null
 
 export function getIO() {
   return io
+}
+
+export function emitAdminCampaignEvent(event, payload = {}) {
+  if (!adminNamespace || !event) return
+  adminNamespace.to('notifications').emit(event, payload)
 }
 
 // ── Presence ────────────────────────────────────────────────────────────────
@@ -231,6 +238,16 @@ export function initSocket(server) {
   })
 
   io.use(socketAuthMiddleware)
+
+  adminNamespace = io.of('/admin')
+  adminNamespace.use(adminSocketAuthMiddleware)
+  adminNamespace.on('connection', (socket) => {
+    socket.join('notifications')
+    socket.on('notifications:subscribe', (_data, ack) => {
+      socket.join('notifications')
+      ack?.({ ok: true })
+    })
+  })
 
   io.on('connection', async (socket) => {
     const userId = socket.userId

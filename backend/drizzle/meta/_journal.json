@@ -155,6 +155,20 @@
       "when": 1782740587282,
       "tag": "0021_low_impossible_man",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1782858134831,
+      "tag": "0022_famous_elektra",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1782861886283,
+      "tag": "0023_unusual_serpent_society",
+      "breakpoints": true
     }
   ]
 }

@@ -32,6 +32,7 @@ export const userPrivacySettings = pgTable('user_privacy_settings', {
   analyticsConsent:       boolean('analytics_consent').notNull().default(true),
   personalizationConsent: boolean('personalization_consent').notNull().default(true),
   marketingEmails:        boolean('marketing_emails').notNull().default(false),
+  campaignNotificationsEnabled: boolean('campaign_notifications_enabled').notNull().default(true),
   thirdPartyMeasurement:  boolean('third_party_measurement').notNull().default(false),
 
   updatedAt:              timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

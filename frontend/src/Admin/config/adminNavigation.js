@@ -20,7 +20,7 @@ export const adminNavGroups = [
   {
     group: 'Product',
     items: [
-      { id: 'notifications', label: 'Notifications', icon: 'send', enabled: false },
+      { id: 'notifications', label: 'Notifications', icon: 'send' },
       { id: 'algorithm', label: 'Algorithm', icon: 'sliders', enabled: false },
       { id: 'plans', label: 'Plans & limits', icon: 'dollar', enabled: false },
     ],

@@ -62,34 +62,48 @@ export async function sendPushNotification(tokens, notification, data = {}) {
   if (!firebaseApp) return
 
   try {
-    const message = {
-      notification,
-      data,
-      tokens,
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
-            badge: 1,
-          },
-        },
-      },
-      android: {
-        priority: 'high',
-        notification: {
-          sound: 'default',
-          channelId: 'ohrny_high_importance_v2',
-          priority: 'max',
-        },
-      },
-    }
-
-    const response = await admin.messaging().sendEachForMulticast(message)
-
-    if (response.failureCount > 0) {
-      pruneStaleTokens(tokens, response.responses)
-    }
+    await sendPushNotificationDetailed(tokens, notification, data)
   } catch (err) {
     console.error('FCM sendEachForMulticast error:', err.message)
   }
+}
+
+export async function sendPushNotificationDetailed(tokens, notification, data = {}) {
+  if (!tokens || tokens.length === 0) {
+    return { successCount: 0, failureCount: 0, responses: [] }
+  }
+
+  const firebaseApp = getApp()
+  if (!firebaseApp) {
+    return { successCount: 0, failureCount: 0, responses: [] }
+  }
+
+  const message = {
+    notification,
+    data,
+    tokens,
+    apns: {
+      payload: {
+        aps: {
+          sound: 'default',
+          badge: 1,
+        },
+      },
+    },
+    android: {
+      priority: 'high',
+      notification: {
+        sound: 'default',
+        channelId: 'ohrny_high_importance_v2',
+        priority: 'max',
+      },
+    },
+  }
+
+  const response = await admin.messaging().sendEachForMulticast(message)
+  if (response.failureCount > 0) {
+    pruneStaleTokens(tokens, response.responses)
+  }
+
+  return response
 }

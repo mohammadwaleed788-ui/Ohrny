@@ -781,6 +781,7 @@ export async function updatePrivacy(req, res) {
       analyticsConsent,
       personalizationConsent,
       marketingEmails,
+      campaignNotificationsEnabled,
       thirdPartyMeasurement,
     } = req.body || {}
 
@@ -811,6 +812,9 @@ export async function updatePrivacy(req, res) {
     if (analyticsConsent !== undefined) updates.analyticsConsent = Boolean(analyticsConsent)
     if (personalizationConsent !== undefined) updates.personalizationConsent = Boolean(personalizationConsent)
     if (marketingEmails !== undefined) updates.marketingEmails = Boolean(marketingEmails)
+    if (campaignNotificationsEnabled !== undefined) {
+      updates.campaignNotificationsEnabled = Boolean(campaignNotificationsEnabled)
+    }
     if (thirdPartyMeasurement !== undefined) updates.thirdPartyMeasurement = Boolean(thirdPartyMeasurement)
 
     if (Object.keys(updates).length > 0) {
