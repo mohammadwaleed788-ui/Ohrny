@@ -16,13 +16,13 @@ export async function createReport(req, res) {
     const { reportedId, reason, details } = req.body || {}
 
     if (!reportedId || typeof reportedId !== 'string') {
-      return res.status(400).json({ error: 'reportedId required' })
+      return res.status(400).json({ error: 'reported_id_required', message: 'reportedId required' })
     }
     if (!VALID_REASONS.includes(reason)) {
-      return res.status(400).json({ error: 'Invalid reason' })
+      return res.status(400).json({ error: 'invalid_reason', message: 'Invalid reason' })
     }
     if (reporterId === reportedId) {
-      return res.status(400).json({ error: 'Cannot report yourself' })
+      return res.status(400).json({ error: 'cannot_report_self', message: 'Cannot report yourself' })
     }
 
     // Insert report
@@ -42,7 +42,7 @@ export async function createReport(req, res) {
     return res.json({ ok: true })
   } catch (err) {
     console.error('createReport error:', err.message)
-    return res.status(500).json({ error: 'Failed to submit report' })
+    return res.status(500).json({ error: 'report_submit_failed', message: 'Failed to submit report' })
   }
 }
 
@@ -55,10 +55,10 @@ export async function blockUser(req, res) {
     const blockedId = req.params.userId
 
     if (!blockedId || typeof blockedId !== 'string') {
-      return res.status(400).json({ error: 'userId required' })
+      return res.status(400).json({ error: 'user_id_required', message: 'userId required' })
     }
     if (blockerId === blockedId) {
-      return res.status(400).json({ error: 'Cannot block yourself' })
+      return res.status(400).json({ error: 'cannot_block_self', message: 'Cannot block yourself' })
     }
 
     // Insert block (idempotent)
@@ -115,7 +115,7 @@ export async function blockUser(req, res) {
     return res.json({ ok: true })
   } catch (err) {
     console.error('blockUser error:', err.message)
-    return res.status(500).json({ error: 'Failed to block user' })
+    return res.status(500).json({ error: 'block_user_failed', message: 'Failed to block user' })
   }
 }
 
@@ -127,9 +127,9 @@ export async function createAppeal(req, res) {
     const enforcementId = String(req.body?.enforcementId || '').trim()
     const statement = String(req.body?.statement || '').trim()
 
-    if (!enforcementId) return res.status(400).json({ error: 'enforcementId required' })
-    if (!statement) return res.status(400).json({ error: 'statement required' })
-    if (statement.length > 2000) return res.status(400).json({ error: 'statement too long' })
+    if (!enforcementId) return res.status(400).json({ error: 'enforcement_id_required', message: 'enforcementId required' })
+    if (!statement) return res.status(400).json({ error: 'statement_required', message: 'statement required' })
+    if (statement.length > 2000) return res.status(400).json({ error: 'statement_too_long', message: 'statement too long' })
 
     const [enforcement] = await db
       .select({ id: userEnforcements.id, active: userEnforcements.active })
@@ -137,8 +137,8 @@ export async function createAppeal(req, res) {
       .where(and(eq(userEnforcements.id, enforcementId), eq(userEnforcements.userId, userId)))
       .limit(1)
 
-    if (!enforcement) return res.status(404).json({ error: 'Enforcement not found' })
-    if (!enforcement.active) return res.status(400).json({ error: 'Enforcement is no longer active' })
+    if (!enforcement) return res.status(404).json({ error: 'enforcement_not_found', message: 'Enforcement not found' })
+    if (!enforcement.active) return res.status(400).json({ error: 'enforcement_not_active', message: 'Enforcement is no longer active' })
 
     const existing = await db
       .select({ id: appeals.id })
@@ -146,7 +146,7 @@ export async function createAppeal(req, res) {
       .where(and(eq(appeals.enforcementId, enforcementId), eq(appeals.status, 'open')))
       .limit(1)
 
-    if (existing[0]) return res.status(409).json({ error: 'An open appeal already exists' })
+    if (existing[0]) return res.status(409).json({ error: 'appeal_already_open', message: 'An open appeal already exists' })
 
     const [created] = await db
       .insert(appeals)
@@ -160,6 +160,6 @@ export async function createAppeal(req, res) {
     return res.json({ ok: true, appeal: created })
   } catch (err) {
     console.error('createAppeal error:', err.message)
-    return res.status(500).json({ error: 'Failed to submit appeal' })
+    return res.status(500).json({ error: 'appeal_submit_failed', message: 'Failed to submit appeal' })
   }
 }

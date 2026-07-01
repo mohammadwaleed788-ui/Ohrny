@@ -7,7 +7,7 @@ export async function activateUserBoost(req, res) {
     return res.json({ ok: true, boost: result.boost })
   } catch (err) {
     console.error('activateUserBoost error:', err)
-    return res.status(500).json({ error: 'Failed to activate boost' })
+    return res.status(500).json({ error: 'activate_boost_failed', message: 'Failed to activate boost' })
   }
 }
 
@@ -18,6 +18,6 @@ export async function cancelUserBoost(req, res) {
     return res.json({ ok: true, boostsLeft: result.boostsLeft })
   } catch (err) {
     console.error('cancelUserBoost error:', err)
-    return res.status(500).json({ error: 'Failed to cancel boost' })
+    return res.status(500).json({ error: 'cancel_boost_failed', message: 'Failed to cancel boost' })
   }
 }

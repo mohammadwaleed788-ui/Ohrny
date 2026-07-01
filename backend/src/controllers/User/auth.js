@@ -171,7 +171,7 @@ export async function sendOtp(req, res) {
       return res.status(err.status).json({ error: err.error })
     }
     console.error(err)
-    return res.status(500).json({ error: 'Failed to send code' })
+    return res.status(500).json({ error: 'send_code_failed', message: 'Failed to send code' })
   }
 }
 
@@ -231,7 +231,7 @@ export async function checkHandle(req, res) {
     }
     return res.json({ available: true })
   } catch {
-    return res.status(500).json({ error: 'Something went wrong' })
+    return res.status(500).json({ error: 'something_went_wrong', message: 'Something went wrong' })
   }
 }
 
@@ -373,7 +373,7 @@ export async function verifyOtp(req, res) {
       return res.status(err.status).json({ error: err.error })
     }
     console.error(err)
-    return res.status(500).json({ error: 'Verification failed' })
+    return res.status(500).json({ error: 'verification_failed', message: 'Verification failed' })
   }
 }
 
@@ -403,35 +403,35 @@ export async function completeOnboarding(req, res) {
     } = req.body || {}
 
     if (!signupToken) {
-      return res.status(400).json({ error: 'signupToken required' })
+      return res.status(400).json({ error: 'signup_token_required', message: 'signupToken required' })
     }
     if (!isValidHandle(handle)) {
-      return res.status(400).json({ error: 'Invalid handle' })
+      return res.status(400).json({ error: 'invalid_handle', message: 'Invalid handle' })
     }
     const safeAge = Number(age)
     if (!Number.isInteger(safeAge) || safeAge < 18 || safeAge > 99) {
-      return res.status(400).json({ error: 'Invalid age' })
+      return res.status(400).json({ error: 'invalid_age_value', message: 'Invalid age' })
     }
     if (!iam || !['woman', 'man', 'nonbinary', 'other'].includes(iam)) {
-      return res.status(400).json({ error: 'Invalid iam value' })
+      return res.status(400).json({ error: 'invalid_iam_value', message: 'Invalid iam value' })
     }
     const mappedGoal = mapRelationshipGoal(relationshipGoal)
     if (!mappedGoal) {
-      return res.status(400).json({ error: 'Invalid relationshipGoal' })
+      return res.status(400).json({ error: 'invalid_relationship_goal', message: 'Invalid relationshipGoal' })
     }
     const mappedStatus = mapRelStatus(relStatus)
     if (!mappedStatus) {
-      return res.status(400).json({ error: 'Invalid relStatus' })
+      return res.status(400).json({ error: 'invalid_rel_status', message: 'Invalid relStatus' })
     }
     if (!Array.isArray(orientation) || orientation.length === 0) {
-      return res.status(400).json({ error: 'orientation required' })
+      return res.status(400).json({ error: 'orientation_required', message: 'orientation required' })
     }
     if (!Array.isArray(photos) || photos.length < 3 || photos.length > 6) {
-      return res.status(400).json({ error: '3-6 photos required' })
+      return res.status(400).json({ error: 'photos_required', message: '3-6 photos required' })
     }
     for (const photo of photos) {
       if (!photo?.storageKey || !photo?.position) {
-        return res.status(400).json({ error: 'Invalid photos payload' })
+        return res.status(400).json({ error: 'invalid_photos_payload', message: 'Invalid photos payload' })
       }
     }
 
@@ -559,7 +559,7 @@ export async function completeOnboarding(req, res) {
     })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Onboarding failed' })
+    return res.status(500).json({ error: 'onboarding_failed', message: 'Onboarding failed' })
   }
 }
 
@@ -567,19 +567,19 @@ export async function refresh(req, res) {
   try {
     const { refreshToken } = req.body || {}
     if (!refreshToken) {
-      return res.status(400).json({ error: 'refreshToken required' })
+      return res.status(400).json({ error: 'refresh_token_required', message: 'refreshToken required' })
     }
 
     let payload
     try {
       payload = verifyUserRefreshToken(refreshToken)
     } catch {
-      return res.status(401).json({ error: 'Invalid session' })
+      return res.status(401).json({ error: 'invalid_session', message: 'Invalid session' })
     }
 
     const [account] = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1)
     if (!account || account.isBanned || account.deletedAt) {
-      return res.status(401).json({ error: 'Invalid session' })
+      return res.status(401).json({ error: 'invalid_session', message: 'Invalid session' })
     }
 
     const accessToken = signAccessTokenUser({ id: account.id, handle: account.handle })
@@ -593,7 +593,7 @@ export async function refresh(req, res) {
     })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Refresh failed' })
+    return res.status(500).json({ error: 'refresh_failed', message: 'Refresh failed' })
   }
 }
 
@@ -602,12 +602,12 @@ export async function me(req, res) {
     const account = await loadUserDetails(req.user.id)
 
     if (!account) {
-      return res.status(404).json({ error: 'Not found' })
+      return res.status(404).json({ error: 'account_not_found', message: 'Not found' })
     }
     return res.json({ user: account })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Failed' })
+    return res.status(500).json({ error: 'request_failed', message: 'Failed' })
   }
 }
 
@@ -757,7 +757,7 @@ export async function updateProfile(req, res) {
     return res.json({ user: updated })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Profile update failed' })
+    return res.status(500).json({ error: 'profile_update_failed', message: 'Profile update failed' })
   }
 }
 
@@ -828,7 +828,7 @@ export async function updatePrivacy(req, res) {
     return res.json({ user: updated })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Privacy update failed' })
+    return res.status(500).json({ error: 'privacy_update_failed', message: 'Privacy update failed' })
   }
 }
 
@@ -961,7 +961,7 @@ export async function updatePreferences(req, res) {
     return res.json({ user: updated })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Preferences update failed' })
+    return res.status(500).json({ error: 'preferences_update_failed', message: 'Preferences update failed' })
   }
 }
 
@@ -975,7 +975,7 @@ export async function deleteAccount(req, res) {
       .where(eq(users.id, userId))
       .limit(1)
 
-    if (!account) return res.status(404).json({ error: 'Account not found' })
+    if (!account) return res.status(404).json({ error: 'account_not_found', message: 'Account not found' })
 
     // Full erasure. Most user-linked tables are ON DELETE CASCADE, so deleting
     // the users row removes them automatically: privacy & discover settings,
@@ -1003,7 +1003,7 @@ export async function deleteAccount(req, res) {
     return res.json({ ok: true })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Account deletion failed' })
+    return res.status(500).json({ error: 'account_deletion_failed', message: 'Account deletion failed' })
   }
 }
 
@@ -1157,7 +1157,7 @@ export async function wipeAccount(req, res) {
     return res.json({ user: updated })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Data wipe failed' })
+    return res.status(500).json({ error: 'data_wipe_failed', message: 'Data wipe failed' })
   }
 }
 
@@ -1181,7 +1181,7 @@ export async function pauseAccount(req, res) {
       .where(eq(users.id, userId))
       .limit(1)
 
-    if (!account) return res.status(404).json({ error: 'Account not found' })
+    if (!account) return res.status(404).json({ error: 'account_not_found', message: 'Account not found' })
 
     // If client supplies a duration explicitly, honor it (pause).
     // Otherwise toggle the current state.
@@ -1189,7 +1189,7 @@ export async function pauseAccount(req, res) {
     let pausedUntil
     if (duration !== undefined) {
       if (duration !== 'indefinite' && !(duration in PAUSE_DURATION_MS)) {
-        return res.status(400).json({ error: 'Invalid duration' })
+        return res.status(400).json({ error: 'invalid_duration', message: 'Invalid duration' })
       }
       nowPaused = true
       pausedUntil =
@@ -1210,6 +1210,6 @@ export async function pauseAccount(req, res) {
     return res.json({ user: updated, isPaused: nowPaused })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Pause toggle failed' })
+    return res.status(500).json({ error: 'pause_toggle_failed', message: 'Pause toggle failed' })
   }
 }

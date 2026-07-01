@@ -290,7 +290,7 @@ export async function getReceivedLikes(req, res) {
     })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Failed to load likes' })
+    return res.status(500).json({ error: 'load_likes_failed', message: 'Failed to load likes' })
   }
 }
 
@@ -299,10 +299,10 @@ export async function passLiker(req, res) {
     // Passing on a liker is free — it just hides them. (Liking back is gated.)
     const userId = req.user.id
     const fromUserId = req.params.fromUserId
-    if (!fromUserId) return res.status(400).json({ error: 'Invalid user' })
+    if (!fromUserId) return res.status(400).json({ error: 'invalid_user_id', message: 'Invalid user' })
 
     const inbound = await findVisibleInboundLike(userId, fromUserId)
-    if (!inbound) return res.status(404).json({ error: 'Like not found' })
+    if (!inbound) return res.status(404).json({ error: 'like_not_found', message: 'Like not found' })
 
     await db
       .insert(likes)
@@ -334,7 +334,7 @@ export async function passLiker(req, res) {
     return res.json({ ok: true, removed: true })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Failed to pass liker' })
+    return res.status(500).json({ error: 'pass_liker_failed', message: 'Failed to pass liker' })
   }
 }
 
@@ -344,7 +344,7 @@ export async function markLikerSeen(req, res) {
   try {
     const userId = req.user.id
     const fromUserId = req.params.fromUserId
-    if (!fromUserId) return res.status(400).json({ error: 'Invalid user' })
+    if (!fromUserId) return res.status(400).json({ error: 'invalid_user_id', message: 'Invalid user' })
 
     await db
       .update(likes)
@@ -361,7 +361,7 @@ export async function markLikerSeen(req, res) {
     return res.json({ ok: true })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Failed to mark like seen' })
+    return res.status(500).json({ error: 'mark_like_seen_failed', message: 'Failed to mark like seen' })
   }
 }
 
@@ -372,7 +372,7 @@ export async function markMatchSeen(req, res) {
   try {
     const userId = req.user.id
     const otherUserId = req.params.otherUserId
-    if (!otherUserId) return res.status(400).json({ error: 'Invalid user' })
+    if (!otherUserId) return res.status(400).json({ error: 'invalid_user_id', message: 'Invalid user' })
 
     const pair = sortPair(userId, otherUserId)
     const iAmUserA = pair.userAId === userId
@@ -384,7 +384,7 @@ export async function markMatchSeen(req, res) {
     return res.json({ ok: true })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Failed to mark match seen' })
+    return res.status(500).json({ error: 'mark_match_seen_failed', message: 'Failed to mark match seen' })
   }
 }
 
@@ -468,7 +468,7 @@ export async function getLikesActivity(req, res) {
     })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Failed to load activity' })
+    return res.status(500).json({ error: 'load_activity_failed', message: 'Failed to load activity' })
   }
 }
 
@@ -611,7 +611,7 @@ export async function getSentLikes(req, res) {
     })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Failed to load sent likes' })
+    return res.status(500).json({ error: 'load_sent_likes_failed', message: 'Failed to load sent likes' })
   }
 }
 
@@ -620,7 +620,7 @@ export async function unlikeUser(req, res) {
     const userId = req.user.id
     const toUserId = req.params.toUserId
     if (!toUserId || toUserId === userId) {
-      return res.status(400).json({ error: 'Invalid user' })
+      return res.status(400).json({ error: 'invalid_user_id', message: 'Invalid user' })
     }
 
     const [likeRow] = await db
@@ -629,7 +629,7 @@ export async function unlikeUser(req, res) {
       .where(and(eq(likes.fromUserId, userId), eq(likes.toUserId, toUserId)))
       .limit(1)
 
-    if (!likeRow) return res.status(404).json({ error: 'Like not found' })
+    if (!likeRow) return res.status(404).json({ error: 'like_not_found', message: 'Like not found' })
 
     if (likeRow.matchId) {
       await db
@@ -645,7 +645,7 @@ export async function unlikeUser(req, res) {
     return res.json({ ok: true })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Failed to unlike' })
+    return res.status(500).json({ error: 'unlike_failed', message: 'Failed to unlike' })
   }
 }
 
@@ -661,11 +661,11 @@ export async function likeBack(req, res) {
     }
 
     const fromUserId = req.params.fromUserId
-    if (!fromUserId) return res.status(400).json({ error: 'Invalid user' })
-    if (fromUserId === userId) return res.status(400).json({ error: 'Cannot like yourself' })
+    if (!fromUserId) return res.status(400).json({ error: 'invalid_user_id', message: 'Invalid user' })
+    if (fromUserId === userId) return res.status(400).json({ error: 'cannot_like_self', message: 'Cannot like yourself' })
 
     const inbound = await findVisibleInboundLike(userId, fromUserId)
-    if (!inbound) return res.status(404).json({ error: 'Like not found' })
+    if (!inbound) return res.status(404).json({ error: 'like_not_found', message: 'Like not found' })
 
     const reciprocalType = inbound.type === 'super_like' ? 'super_like' : 'like'
     await db
@@ -738,6 +738,6 @@ export async function likeBack(req, res) {
     return res.json({ ok: true, matched: true, matchId: matchRow.id })
   } catch (err) {
     console.error(err)
-    return res.status(500).json({ error: 'Failed to like back' })
+    return res.status(500).json({ error: 'like_back_failed', message: 'Failed to like back' })
   }
 }

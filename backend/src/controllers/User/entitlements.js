@@ -16,7 +16,7 @@ export async function syncConsumablePurchase(req, res) {
   try {
     const { productId, transactionId, price, currency, platform } = req.body || {}
     if (!productId || !transactionId) {
-      return res.status(400).json({ error: 'productId and transactionId are required' })
+      return res.status(400).json({ error: 'product_and_transaction_required', message: 'productId and transactionId are required' })
     }
 
     const consumable = normalizeConsumableProduct(productId)
@@ -57,7 +57,7 @@ export async function syncConsumablePurchase(req, res) {
     })
   } catch (err) {
     console.error('syncConsumablePurchase error:', err)
-    return res.status(500).json({ error: 'Failed to sync purchase' })
+    return res.status(500).json({ error: 'sync_purchase_failed', message: 'Failed to sync purchase' })
   }
 }
 
@@ -82,18 +82,18 @@ export async function syncSubscriptionPurchase(req, res) {
     })
   } catch (err) {
     console.error('syncSubscriptionPurchase error:', err)
-    return res.status(500).json({ error: 'Failed to sync subscription' })
+    return res.status(500).json({ error: 'sync_subscription_failed', message: 'Failed to sync subscription' })
   }
 }
 
 export async function getEntitlements(req, res) {
   try {
     const entitlements = await getEffectiveEntitlements(req.user.id)
-    if (!entitlements) return res.status(404).json({ error: 'User not found' })
+    if (!entitlements) return res.status(404).json({ error: 'user_not_found', message: 'User not found' })
     return res.json(entitlements)
   } catch (err) {
     console.error('getEntitlements error:', err)
-    return res.status(500).json({ error: 'Failed to load entitlements' })
+    return res.status(500).json({ error: 'load_entitlements_failed', message: 'Failed to load entitlements' })
   }
 }
 
@@ -105,6 +105,6 @@ export async function getSubscriptionProducts(req, res) {
     return res.json({ products })
   } catch (err) {
     console.error('getSubscriptionProducts error:', err)
-    return res.status(500).json({ error: 'Failed to load subscription products' })
+    return res.status(500).json({ error: 'load_subscription_products_failed', message: 'Failed to load subscription products' })
   }
 }
