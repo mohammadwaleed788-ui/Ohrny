@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt'
-import { eq, and, or, desc, gte, lt, isNull, inArray } from 'drizzle-orm'
+import { eq, and, or, desc, gte, lt, isNull, inArray, count } from 'drizzle-orm'
 import { db } from '../../../db/index.js'
 import {
   users,
@@ -33,7 +33,7 @@ async function loadUserDetails(userId) {
 
   const entitlements = await getEffectiveEntitlements(userId)
 
-  const [lifestyle, privacySettings, discoverPreferences, photos, prompts, interests, devices] = await Promise.all([
+  const [lifestyle, privacySettings, discoverPreferences, photos, prompts, interests, devices, matchesCount] = await Promise.all([
     db.select().from(userLifestyle).where(eq(userLifestyle.userId, userId)).limit(1).then((rows) => rows[0] || null),
     db.select().from(userPrivacySettings).where(eq(userPrivacySettings.userId, userId)).limit(1).then((rows) => rows[0] || null),
     db.select().from(userDiscoverPreferences).where(eq(userDiscoverPreferences.userId, userId)).limit(1).then((rows) => rows[0] || null),
@@ -41,6 +41,13 @@ async function loadUserDetails(userId) {
     db.select().from(userPrompts).where(eq(userPrompts.userId, userId)),
     db.select().from(userInterests).where(eq(userInterests.userId, userId)),
     db.select().from(userDevices).where(eq(userDevices.userId, userId)),
+    // Real count of active matches (both directions) so the profile can show it
+    // immediately from /me — without waiting for the match list to be fetched.
+    db
+      .select({ value: count() })
+      .from(matches)
+      .where(and(eq(matches.isActive, true), or(eq(matches.userAId, userId), eq(matches.userBId, userId))))
+      .then((rows) => Number(rows[0]?.value || 0)),
   ])
 
   return {
@@ -52,6 +59,8 @@ async function loadUserDetails(userId) {
     prompts: prompts.sort((a, b) => a.position - b.position),
     interests: interests.sort((a, b) => a.position - b.position),
     devices: devices.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)),
+    // Live active-match count (not the `matchesStarted` paywall counter).
+    matchesCount,
     // Single source of truth for plan / active subscription / balances /
     // limits / feature flags — the client reads everything from here.
     entitlements: entitlements || null,
