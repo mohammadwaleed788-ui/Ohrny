@@ -3,6 +3,7 @@ import { db } from '../../../db/index.js'
 import { users, userPhotos } from '../../../db/schema/users.js'
 import { getUserFcmTokens } from '../../controllers/User/device.js'
 import { sendPushNotification } from './firebase.js'
+import { localizedNotification } from './localized.js'
 
 // Returns { handle, mainPhotoKey, blurAmount } for a user, or null on failure.
 async function fetchUserCard(userId) {
@@ -41,12 +42,11 @@ async function fetchUserCard(userId) {
 export async function notifyPassed(toUserId, passedByUserId) {
   const card = await fetchUserCard(passedByUserId)
 
-  const notification = {
-    title: 'Not a match this time',
-    body: card
-      ? `${card.handle} passed on your like`
-      : 'Someone passed on your like',
-  }
+  const notification = await localizedNotification(
+    toUserId,
+    { titleKey: 'likeRejected_title', bodyKey: 'likeRejected_body' },
+    { handle: card?.handle ?? 'Someone' },
+  )
 
   const data = {
     type: 'like_rejected',
@@ -62,12 +62,14 @@ export async function notifyNewLike(toUserId, fromUserId, isSuperLike) {
   const type = isSuperLike ? 'new_super_like' : 'new_like'
   const card = await fetchUserCard(fromUserId)
 
-  const notification = {
-    title: isSuperLike ? 'New Super Like!' : 'New Like!',
-    body: card
-      ? `${card.handle} liked your profile`
-      : 'Someone liked your profile',
-  }
+  const notification = await localizedNotification(
+    toUserId,
+    {
+      titleKey: isSuperLike ? 'newSuperLike_title' : 'newLike_title',
+      bodyKey: 'newLike_body',
+    },
+    { handle: card?.handle ?? 'Someone' },
+  )
 
   // FCM data values must be strings.
   const data = {
@@ -86,12 +88,11 @@ export async function notifyNewLike(toUserId, fromUserId, isSuperLike) {
 export async function notifyNewMatch(toUserId, matchedWithUserId) {
   const card = await fetchUserCard(matchedWithUserId)
 
-  const notification = {
-    title: "It's a Match!",
-    body: card
-      ? `You matched with ${card.handle}`
-      : 'You matched with someone new',
-  }
+  const notification = await localizedNotification(
+    toUserId,
+    { titleKey: 'newMatch_title', bodyKey: 'newMatch_body' },
+    { handle: card?.handle ?? 'someone new' },
+  )
 
   // FCM data values must be strings.
   const data = {

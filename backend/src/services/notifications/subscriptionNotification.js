@@ -1,15 +1,17 @@
 import { getUserFcmTokens } from '../../controllers/User/device.js'
 import { sendPushNotification } from './firebase.js'
+import { localizedNotification } from './localized.js'
 
 // Fire-and-forget: a plan member just received their weekly Super Like top-up.
 export async function notifyWeeklySuperLikes(userId, count) {
   const n = Number(count) || 0
   if (n <= 0) return
 
-  const notification = {
-    title: 'Your weekly Super Likes are here 💫',
-    body: `You've got ${n} Super Like${n === 1 ? '' : 's'} to use this week.`,
-  }
+  const notification = await localizedNotification(
+    userId,
+    { titleKey: 'weeklySuperLikes_title', bodyKey: 'weeklySuperLikes_body' },
+    { count: n },
+  )
 
   const data = {
     type: 'weekly_super_likes',
@@ -25,10 +27,10 @@ export async function notifyWeeklySuperLikes(userId, count) {
 
 // Fire-and-forget: a Platin/Private member just received their weekly free Boost.
 export async function notifyWeeklyBoost(userId) {
-  const notification = {
-    title: 'Your weekly Boost is ready 🚀',
-    body: 'Activate it to jump to the top of the deck for 30 minutes.',
-  }
+  const notification = await localizedNotification(
+    userId,
+    { titleKey: 'weeklyBoost_title', bodyKey: 'weeklyBoost_body' },
+  )
 
   const data = {
     type: 'weekly_boost',

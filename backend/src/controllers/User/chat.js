@@ -533,32 +533,41 @@ export async function requestUnlock(req, res) {
     }
 
     const recipientId = isUserA ? match.userBId : match.userAId
-    const updates = { updatedAt: new Date() }
 
+    // Atomic conditional unlock: set this side's requested flag and, in the same
+    // UPDATE, flip photosUnlocked=true only when the OTHER side's flag is already
+    // true in the DB. Avoids a read-then-write race where two simultaneous
+    // requests both see the other as not-yet-requested and unlock never happens.
+    const otherFlag = isUserA ? matches.userBUnlockRequested : matches.userAUnlockRequested
+    const updates = {
+      updatedAt: new Date(),
+      photosUnlocked: sql`CASE WHEN ${otherFlag} THEN true ELSE ${matches.photosUnlocked} END`,
+      photosUnlockedAt: sql`CASE WHEN ${otherFlag} AND ${matches.photosUnlockedAt} IS NULL THEN NOW() ELSE ${matches.photosUnlockedAt} END`,
+    }
     if (isUserA) updates.userAUnlockRequested = true
     else updates.userBUnlockRequested = true
 
-    const otherRequested = isUserA ? match.userBUnlockRequested : match.userAUnlockRequested
-    if (otherRequested) {
-      updates.photosUnlocked = true
-      updates.photosUnlockedAt = new Date()
-    }
+    const [updated] = await db
+      .update(matches)
+      .set(updates)
+      .where(eq(matches.id, matchId))
+      .returning({ photosUnlocked: matches.photosUnlocked })
 
-    await db.update(matches).set(updates).where(eq(matches.id, matchId))
+    const unlocked = !!updated?.photosUnlocked
 
     const io = getIO()
     if (io) {
-      if (updates.photosUnlocked) {
+      if (unlocked) {
         io.to(`match:${matchId}`).emit('unlock:complete', { matchId })
       } else {
         io.to(`match:${matchId}`).emit('unlock:requested', { matchId, requestedBy: userId })
         notifyPhotoUnlockRequest(recipientId, req.user.handle, matchId)
       }
-    } else if (!updates.photosUnlocked) {
+    } else if (!unlocked) {
       notifyPhotoUnlockRequest(recipientId, req.user.handle, matchId)
     }
 
-    return res.json({ ok: true, unlocked: !!updates.photosUnlocked })
+    return res.json({ ok: true, unlocked })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Failed to request unlock' })

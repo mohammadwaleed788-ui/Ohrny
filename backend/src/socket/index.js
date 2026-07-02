@@ -1,5 +1,5 @@
 import { Server } from 'socket.io'
-import { and, eq, isNull, or } from 'drizzle-orm'
+import { and, eq, isNull, or, sql } from 'drizzle-orm'
 import { socketAuthMiddleware } from './auth.js'
 import { adminSocketAuthMiddleware } from './adminAuth.js'
 import { db } from '../../db/index.js'
@@ -524,28 +524,36 @@ export function initSocket(server) {
         if (!isUserA && !isUserB) return ack?.({ error: 'Not in this match' })
 
         const recipientId = isUserA ? match.userBId : match.userAId
-        const updates = {}
+
+        // Atomic conditional unlock: set this side's requested flag and, in the
+        // same UPDATE, flip photosUnlocked=true only when the OTHER side's flag
+        // is already true in the DB. This avoids a read-then-write race where two
+        // simultaneous requests both see the other as not-yet-requested.
+        const otherFlag = isUserA ? matches.userBUnlockRequested : matches.userAUnlockRequested
+        const updates = {
+          updatedAt: new Date(),
+          photosUnlocked: sql`CASE WHEN ${otherFlag} THEN true ELSE ${matches.photosUnlocked} END`,
+          photosUnlockedAt: sql`CASE WHEN ${otherFlag} AND ${matches.photosUnlockedAt} IS NULL THEN NOW() ELSE ${matches.photosUnlockedAt} END`,
+        }
         if (isUserA) updates.userAUnlockRequested = true
         else updates.userBUnlockRequested = true
 
-        const otherRequested = isUserA ? match.userBUnlockRequested : match.userAUnlockRequested
-        if (otherRequested) {
-          updates.photosUnlocked = true
-          updates.photosUnlockedAt = new Date()
-        }
+        const [updated] = await db
+          .update(matches)
+          .set(updates)
+          .where(eq(matches.id, matchId))
+          .returning({ photosUnlocked: matches.photosUnlocked })
 
-        updates.updatedAt = new Date()
+        const unlocked = !!updated?.photosUnlocked
 
-        await db.update(matches).set(updates).where(eq(matches.id, matchId))
-
-        if (updates.photosUnlocked) {
+        if (unlocked) {
           io.to(`match:${matchId}`).emit('unlock:complete', { matchId })
         } else {
           io.to(`match:${matchId}`).emit('unlock:requested', { matchId, requestedBy: userId })
-          notifyPhotoUnlockRequest(recipientId, socket.userHandle)
+          notifyPhotoUnlockRequest(recipientId, socket.userHandle, matchId)
         }
 
-        ack?.({ ok: true, unlocked: !!updates.photosUnlocked })
+        ack?.({ ok: true, unlocked })
       } catch (err) {
         console.error('unlock:request error:', err.message)
         ack?.({ error: 'Failed to request unlock' })

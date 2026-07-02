@@ -1,13 +1,15 @@
 import { getUserFcmTokens } from '../../controllers/User/device.js'
 import { sendPushNotification } from './firebase.js'
+import { localizedNotification } from './localized.js'
 
 export async function notifyNewMessage(recipientId, senderHandle, matchId) {
   const handle = senderHandle || 'Someone'
 
-  const notification = {
-    title: 'New message',
-    body: `${handle} sent you a message`,
-  }
+  const notification = await localizedNotification(
+    recipientId,
+    { titleKey: 'newMessage_title', bodyKey: 'newMessage_body' },
+    { handle },
+  )
 
   const data = {
     type: 'new_message',
@@ -23,10 +25,11 @@ export async function notifyNewMessage(recipientId, senderHandle, matchId) {
 export async function notifyPhotoUnlockRequest(recipientId, senderHandle, matchId) {
   const handle = senderHandle || 'Someone'
 
-  const notification = {
-    title: 'Photo unlock request',
-    body: `${handle} wants to unlock photos with you`,
-  }
+  const notification = await localizedNotification(
+    recipientId,
+    { titleKey: 'photoUnlock_title', bodyKey: 'photoUnlock_body' },
+    { handle },
+  )
 
   const data = {
     type: 'photo_unlock_request',
@@ -43,10 +46,14 @@ export async function notifyIncomingCall(recipientId, callerHandle, callType, { 
   const handle = callerHandle || 'Someone'
   const label = callType === 'video' ? 'video' : 'voice'
 
-  const notification = {
-    title: `Incoming ${label} call`,
-    body: `${handle} is calling you`,
-  }
+  const notification = await localizedNotification(
+    recipientId,
+    {
+      titleKey: label === 'video' ? 'incomingCallVideo_title' : 'incomingCallVoice_title',
+      bodyKey: 'incomingCall_body',
+    },
+    { handle },
+  )
 
   const data = {
     type: 'incoming_call',
